@@ -1,1 +1,1 @@
-print("Quiz CLI start")
+print("Quiz CLI - wersja BRUDNOPIS")
