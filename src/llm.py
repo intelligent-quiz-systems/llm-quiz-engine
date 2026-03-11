@@ -36,6 +36,11 @@ Requirements:
 - correct_index must be an integer from 0 to 3
 - all content must be in Polish
 - difficulty must match: {difficulty}
+- questions must stay strictly within the topic: {topic}
+- do not expand the topic
+- do not introduce subtraction, multiplication, division, powers, equations, or mixed operations unless they are explicitly part of the topic
+- if the topic is simple arithmetic, generate only direct single-operation exercises
+- keep questions appropriate to the declared topic and difficulty
 """
 
     chat_completion = client.chat.completions.create(

@@ -1,7 +1,23 @@
 from src.llm import generate_quiz
 
 topic = input("Podaj temat quizu: ")
-difficulty = input("Wybierz poziom trudności (easy/medium/hard): ")
+print("Wybierz poziom trudności:")
+print("1) łatwy")
+print("2) średni")
+print("3) trudny")
+
+difficulty_choice = input("Twój wybór (1/2/3): ").strip()
+
+while difficulty_choice not in ["1", "2", "3"]:
+    difficulty_choice = input("Podaj tylko 1, 2 lub 3: ").strip()
+
+difficulty_map = {
+    "1": "easy",
+    "2": "medium",
+    "3": "hard"
+}
+
+difficulty = difficulty_map[difficulty_choice]
 num_questions = int(input("Ile pytań wygenerować? "))
 
 quiz = generate_quiz(topic, difficulty, num_questions)
