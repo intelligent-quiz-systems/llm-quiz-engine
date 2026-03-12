@@ -11,15 +11,32 @@ Before running the application, install all required Python packages:
 pip install -r requirements.txt
 ```
 
-### 2. Start the Application in Browser Mode
+### 2. Configure Environment Variables
+
+Create a `.env` file in the root directory.
+
+You can copy the example file:
+
+```bash
+cp .env.example .env
+```
+
+Then open the `.env` file and set your API key:
+
+```
+OPENAI_API_KEY=your_api_key_here
+OPENAI_BASE_URL=https://api.groq.com/openai/v1
+```
+
+### 3. Start the Application in Browser Mode
 
 Run the following command in the terminal:
 
 ```bash
-streamlit run src\app.py
+streamlit run src/app.py
 ```
 
-### 3. Open the Application
+### 4. Open the Application
 
 After starting, the application will be available in your browser at:
 
