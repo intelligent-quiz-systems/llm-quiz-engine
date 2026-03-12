@@ -24,7 +24,13 @@ if st.session_state.app_step == "config":
 
     if config and config.get("submitted"):
         # TODO: zastąpić przez generate_quiz(config)
-        raw_quiz = json.loads(DEFAULT_JSON)
+        from llm.llm import generate_quiz
+
+        raw_quiz = generate_quiz(
+            config["topic"],
+            config["difficulty"],
+            config["question_count"]
+        )
 
         is_valid, error_message = validate_quiz(raw_quiz)
         if not is_valid:
