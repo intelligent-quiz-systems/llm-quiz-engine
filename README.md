@@ -1,86 +1,28 @@
-# LLM Quiz Generator
+# llm-quiz-engine
+AI-powered system for automated quiz generation using Large Language Models (LLMs).
 
-Simple CLI quiz generator powered by a Large Language Model (LLM).
+## Installation and Running the Application
 
-The application connects to the Groq API using the OpenAI-compatible interface and generates quiz questions in structured JSON format.
+### 1. Install Dependencies
 
----
+Before running the application, install all required Python packages:
 
-# Features
+```bash
+pip install -r requirements.txt
+```
 
-- quiz generation using LLM
-- structured JSON output
-- interactive CLI quiz
-- answer validation
-- score calculation
-- quiz summary
+### 2. Start the Application in Browser Mode
 
----
+Run the following command in the terminal:
 
-# Setup
+```bash
+streamlit run src\app.py
+```
 
-## 1. Clone repository
+### 3. Open the Application
 
-git clone <repository_url>
+After starting, the application will be available in your browser at:
 
-## 2. Create `.env` file
-
-Create a file named `.env` in the root directory.
-
-Example configuration:
-
-OPENAI_API_KEY=your_api_key_here  
-OPENAI_BASE_URL=https://api.groq.com/openai/v1
-
-You can copy the example file:
-
-cp .env.example .env
-
-Then paste your API key.
-
----
-
-## 3. Install dependencies
-
-pip install groq python-dotenv
-
----
-
-## 4. Run the application
-
-python main.py
-
----
-
-# Example usage
-
-The program will ask for:
-
-- quiz topic
-- difficulty level
-- number of questions
-
-Then it generates a quiz and lets the user answer questions one by one.
-
-# Example:
-
-Podaj temat quizu: matematyka
-Wybierz poziom trudności:
-
-- łatwy
-- średni
-- trudny
-
-Ile pytań wygenerować? 3
-
-## Project structure
-
-quiz-cli-proba
-│
-├── src
-│ └── llm.py # LLM integration and quiz generation
-│
-├── main.py # CLI quiz logic
-├── .env.example # example environment configuration
-├── .gitignore
-└── README.md
+```
+http://localhost:8502/
+```
