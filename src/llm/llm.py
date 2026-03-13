@@ -2,6 +2,7 @@ from groq import Groq
 import os
 import json
 
+
 api_key = os.getenv("GROQ_API_KEY")
 if not api_key:
     raise ValueError("GROQ_API_KEY not set in environment")
@@ -9,7 +10,9 @@ if not api_key:
 client = Groq(api_key=api_key)
 
 
-def generate_quiz(topic: str, difficulty_pl: str, num_questions: int):
+def generate_quiz(topic: str, difficulty, num_questions: int):
+
+    difficulty_pl = str(difficulty)
 
     difficulty_map = {
         "Łatwy": "easy",
@@ -17,7 +20,7 @@ def generate_quiz(topic: str, difficulty_pl: str, num_questions: int):
         "Trudny": "hard"
     }
 
-    difficulty_en = difficulty_map.get(difficulty_pl, "medium")
+    difficulty_en = difficulty_map.get(difficulty_pl, difficulty_pl)
 
     prompt = f"""
 You are a JSON generator.
@@ -65,10 +68,5 @@ Requirements:
     print(repr(response_text))
     print("========================\n")
 
-    try:
-        quiz_data = json.loads(response_text)
-    except json.JSONDecodeError as e:
-        print("JSON error:", e)
-        raise ValueError("LLM did not return valid JSON")
-
+    quiz_data = json.loads(response_text)
     return quiz_data
