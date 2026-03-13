@@ -1,6 +1,5 @@
 # src/prompt_manager/groq_client.py
 from groq import Groq
-from typing import Optional
 import os
 from dotenv import load_dotenv
 
@@ -14,11 +13,11 @@ class GroqClient:
 
         self.client = Groq(api_key=self.api_key)
 
-    def generate(self, messages: list, model: str = "llama3-70b-8192", max_tokens: int = 512, temperature: float = 0.7) -> Optional[str]:
-        """Wysyła zapytanie do Groq i zwraca odpowiedź."""
+    def generate_response(self, prompt: str, model: str = "llama3-70b-8192", max_tokens: int = 512, temperature: float = 0.7) -> Optional[str]:
+        """Wysyła prosty prompt jako wiadomość użytkownika i zwraca odpowiedź."""
         try:
             response = self.client.chat.completions.create(
-                messages=messages,
+                messages=[{"role": "user", "content": prompt}],
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
