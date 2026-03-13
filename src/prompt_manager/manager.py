@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 from .loader import load_prompts_from_directory
+from .exceptions import PromptNotFoundError
+from .groq_client import GroqClient  # ← ważny import!
 
 
 class PromptManager:
@@ -11,9 +13,10 @@ class PromptManager:
     Ładuje prompty z katalogu JSON, pozwala budować je z parametrami.
     """
 
-    def __init__(self, prompts_dir: str | Path = "data/prompts"):
+    def __init__(self, prompts_dir: str | Path = "data/prompts", api_key: Optional[str] = None):
         self.prompts_dir = Path(prompts_dir)
         self.prompts: Dict[str, Dict[str, Any]] = {}
+        self.groq = GroqClient(api_key=api_key)  # ← tutaj inicjujemy Groq!
         self.load_prompts()
 
     def load_prompts(self) -> None:
@@ -43,3 +46,24 @@ class PromptManager:
             raise ValueError(f"Brak parametru {e} w szablonie {template_name}")
 
         return f"{system}\n\n{user}"
+
+    def generate_from_image_description(
+        self,
+        opis_obrazu: str,
+        template_name: str = "image_based",
+        **kwargs
+    ) -> Optional[str]:
+        """
+        Generuje pytanie quizowe na podstawie tekstowego opisu obrazu.
+        Używa szablonu image_based.json.
+        """
+        template = self.get_prompt(template_name)
+        if not template:
+            raise PromptNotFoundError(template_name)
+
+        # Podstawiamy opis obrazu + pozostałe parametry
+        prompt = self.build_prompt(template_name, opis_obrazu=opis_obrazu, **kwargs)
+        if not prompt:
+            return None
+
+        return self.groq.generate_response(prompt)
