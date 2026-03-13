@@ -47,6 +47,17 @@ class PromptManager:
 
         return f"{system}\n\n{user}"
 
+    def generate(self, template_name: str, **kwargs) -> Optional[str]:
+        """
+        Generuje pełny prompt i wysyła go do Groq.
+        Zwraca wygenerowaną odpowiedź lub None w razie błędu.
+        """
+        prompt = self.build_prompt(template_name, **kwargs)
+        if not prompt:
+            return None
+
+        return self.groq.generate_response(prompt)
+
     def generate_from_image_description(
         self,
         opis_obrazu: str,
