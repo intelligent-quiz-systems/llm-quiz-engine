@@ -13,7 +13,7 @@ class GroqClient:
 
         self.client = Groq(api_key=self.api_key)
 
-    def generate_response(self, prompt: str, model: str = "llama3-70b-8192", max_tokens: int = 512, temperature: float = 0.7) -> Optional[str]:
+    def generate_response(self, prompt: str, model: str = "llama-3.1-70b-versatile", max_tokens: int = 512, temperature: float = 0.7) -> Optional[str]:
         """Wysyła prosty prompt jako wiadomość użytkownika i zwraca odpowiedź."""
         try:
             response = self.client.chat.completions.create(
