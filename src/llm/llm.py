@@ -2,14 +2,28 @@ from groq import Groq
 import os
 import json
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+api_key = os.getenv("GROQ_API_KEY")
+if not api_key:
+    raise ValueError("GROQ_API_KEY not set in environment")
 
-def generate_quiz(topic: str, difficulty: str, num_questions: int):
+client = Groq(api_key=api_key)
+
+
+def generate_quiz(topic: str, difficulty_pl: str, num_questions: int):
+
+    difficulty_map = {
+        "Łatwy": "easy",
+        "Średni": "medium",
+        "Trudny": "hard"
+    }
+
+    difficulty_en = difficulty_map.get(difficulty_pl, "medium")
+
     prompt = f"""
 You are a JSON generator.
 
 Generate a quiz in Polish about: {topic}
-Difficulty level: {difficulty}
+Difficulty level: {difficulty_en}
 Number of questions: {num_questions}
 
 Return ONLY valid JSON.
@@ -35,12 +49,8 @@ Requirements:
 - each question must have exactly 4 options
 - correct_index must be an integer from 0 to 3
 - all content must be in Polish
-- difficulty must match: {difficulty}
+- difficulty must match: {difficulty_en}
 - questions must stay strictly within the topic: {topic}
-- do not expand the topic
-- do not introduce subtraction, multiplication, division, powers, equations, or mixed operations unless they are explicitly part of the topic
-- if the topic is simple arithmetic, generate only direct single-operation exercises
-- keep questions appropriate to the declared topic and difficulty
 """
 
     chat_completion = client.chat.completions.create(
@@ -55,5 +65,10 @@ Requirements:
     print(repr(response_text))
     print("========================\n")
 
-    quiz_data = json.loads(response_text)
+    try:
+        quiz_data = json.loads(response_text)
+    except json.JSONDecodeError as e:
+        print("JSON error:", e)
+        raise ValueError("LLM did not return valid JSON")
+
     return quiz_data
