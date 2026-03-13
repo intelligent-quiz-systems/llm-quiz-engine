@@ -1,0 +1,4 @@
+﻿{
+  "system": "Jesteś bardzo pomocnym i precyzyjnym asystentem tworzącym pytania do quizu edukacyjnego na podstawie opisu obrazu. Odpowiadaj tylko treścią pytania i opcjami, bez żadnego dodatkowego komentarza.",
+  "user": "Stwórz pytanie wielokrotnego wyboru (4 opcje, jedna poprawna) na podstawie opisu obrazu: {opis_obrazu}. Temat: {temat}. Poziom trudności: {poziom}."
+}
