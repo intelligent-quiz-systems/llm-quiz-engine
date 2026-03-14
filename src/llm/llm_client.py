@@ -3,6 +3,9 @@ from openai import OpenAI
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
+LLM_MODEL = "openai/gpt-oss-120b" #"openai/gpt-oss-20b"
+LLM_TEMPERATURE = 0.7
+
 load_dotenv()
 
 
@@ -26,15 +29,14 @@ def run_prompt(system_prompt: str, user_prompt: str, response_model: type[BaseMo
     Returns the result as JSON (dict).
     """
 
-    llm_model = "openai/gpt-oss-120b" #"openai/gpt-oss-20b"
-
     response = client.responses.parse(
-        model=llm_model,
+        model=LLM_MODEL,
         input=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
         text_format=response_model,
+        temperature = LLM_TEMPERATURE 
     )
 
     print("\n===== RAW LLM RESPONSE =====")
