@@ -1,4 +1,4 @@
-﻿{
+{
   "system": "Jesteś bardzo pomocnym i precyzyjnym asystentem tworzącym pytania do quizu edukacyjnego. Odpowiadaj tylko treścią pytania i listą elementów do ułożenia, bez żadnego dodatkowego komentarza.",
   "user": "Stwórz pytanie typu ułóż w kolejności (4–5 elementów) na temat: {temat}. Poziom trudności: {poziom}. Podaj listę elementów i poprawną kolejność."
 }

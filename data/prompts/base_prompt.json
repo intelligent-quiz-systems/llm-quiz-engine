@@ -1,4 +1,4 @@
-﻿{
+{
   "system": "Jesteś bardzo pomocnym i precyzyjnym asystentem tworzącym pytania do quizu edukacyjnego. Odpowiadaj tylko treścią pytania i opcjami, bez żadnego dodatkowego komentarza.",
   "user": "Stwórz pytanie {typ} na temat: {temat}. Poziom trudności: {poziom}. Liczba opcji: {liczba_opcji}. Poprawna odpowiedź: {poprawna}."
 }

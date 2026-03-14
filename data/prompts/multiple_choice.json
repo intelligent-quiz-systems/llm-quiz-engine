@@ -1,4 +1,4 @@
-﻿{
+{
   "system": "Jesteś bardzo pomocnym i precyzyjnym asystentem tworzącym pytania do quizu edukacyjnego. Odpowiadaj tylko treścią pytania i opcjami, bez żadnego dodatkowego komentarza.",
   "user": "Stwórz pytanie wielokrotnego wyboru (4 opcje, jedna poprawna) na temat: {temat}. Poziom trudności: {poziom}. Pytanie musi być jasne i edukacyjne."
 }
