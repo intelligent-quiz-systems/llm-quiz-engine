@@ -4,6 +4,7 @@ from enum import Enum
 
 import streamlit as st
 import streamlit.components.v1 as components
+from streamlit_autorefresh import st_autorefresh
 from validations.validate_quiz import validate_quiz
 
 QUIZ_PAGE_SIZE = 3
@@ -102,7 +103,7 @@ def inject_css():
         """
         <style>
         .block-container {
-            padding-top: 1.2rem;
+            padding-top: 1rem;
         }
 
         h1 {
@@ -170,6 +171,96 @@ def inject_css():
     )
 
 
+def inject_browser_scroll_on_nav():
+    components.html(
+        """
+        <script>
+        (function () {
+            const parentDoc = window.parent.document;
+
+            function forceTopScroll() {
+                const win = window.parent;
+
+                try {
+                    win.scrollTo({ top: 0, left: 0, behavior: "auto" });
+                } catch (e) {}
+
+                const selectors = [
+                    '[data-testid="stAppViewContainer"]',
+                    '[data-testid="stMain"]',
+                    'section.main',
+                    '.main',
+                    'body',
+                    'html'
+                ];
+
+                selectors.forEach((selector) => {
+                    const el = parentDoc.querySelector(selector);
+                    if (el) {
+                        try {
+                            el.scrollTop = 0;
+                            el.scrollTo({ top: 0, left: 0, behavior: "auto" });
+                        } catch (e) {}
+                    }
+                });
+
+                if (parentDoc.documentElement) {
+                    parentDoc.documentElement.scrollTop = 0;
+                }
+
+                if (parentDoc.body) {
+                    parentDoc.body.scrollTop = 0;
+                }
+            }
+
+            function bindScroll(buttonText) {
+                const buttons = Array.from(parentDoc.querySelectorAll("button"));
+                const target = buttons.find((btn) => {
+                    const text = (btn.innerText || btn.textContent || "").trim();
+                    return text === buttonText;
+                });
+
+                if (!target) return;
+                if (target.dataset.scrollBound === "1") return;
+
+                target.dataset.scrollBound = "1";
+
+                target.addEventListener(
+                    "click",
+                    function () {
+                        forceTopScroll();
+                        requestAnimationFrame(forceTopScroll);
+                        setTimeout(forceTopScroll, 0);
+                        setTimeout(forceTopScroll, 20);
+                        setTimeout(forceTopScroll, 60);
+                        setTimeout(forceTopScroll, 120);
+                    },
+                    true
+                );
+            }
+
+            function bindAll() {
+                [
+                    "Dalej",
+                    "Wstecz",
+                    "Zakończ quiz",
+                    "Resetuj quiz",
+                    "Nowy quiz",
+                    "Generuj quiz"
+                ].forEach(bindScroll);
+            }
+
+            bindAll();
+            setTimeout(bindAll, 150);
+            setTimeout(bindAll, 400);
+            setTimeout(bindAll, 800);
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
 def difficulty_label(value):
     if isinstance(value, QuizDifficulty):
         return value.value
@@ -202,6 +293,8 @@ def render_config_screen():
     )
 
     submitted = st.button("Generuj quiz", type="primary")
+
+    inject_browser_scroll_on_nav()
 
     return {
         "submitted": submitted,
@@ -260,8 +353,7 @@ def reset_quiz_state():
         del st.session_state[key]
 
 
-@st.fragment(run_every="1s")
-def render_sidebar_timer_fragment():
+def render_sidebar_timer():
     if st.session_state.app_step != "quiz":
         return
 
@@ -297,10 +389,12 @@ def render_sidebar_status(quiz, config):
         st.write(f"**Strona:** {st.session_state.current_page + 1}/{total_pages}")
         st.write(f"**Trudność:** {difficulty_label(config.get('difficulty'))}")
         st.write(f"**Limit czasu:** {config.get('time_limit', DEFAULT_TIME_LIMIT_MINUTES)} min")
-        render_sidebar_timer_fragment()
+        render_sidebar_timer()
 
 
 def render_quiz_screen(quiz, config):
+    st_autorefresh(interval=1000, key="quiz_timer")
+
     is_valid, error_message = validate_quiz(quiz)
     if not is_valid:
         st.error(f"Niepoprawny format quizu: {error_message}")
@@ -357,6 +451,8 @@ def render_quiz_screen(quiz, config):
         if st.button("Zakończ quiz", type="primary"):
             st.session_state.app_step = "results"
             st.rerun()
+
+    inject_browser_scroll_on_nav()
 
 
 def calculate_score(quiz):
@@ -457,3 +553,5 @@ def render_results_screen(quiz, config):
             reset_quiz_state()
             st.session_state.app_step = "config"
             st.rerun()
+
+    inject_browser_scroll_on_nav()
