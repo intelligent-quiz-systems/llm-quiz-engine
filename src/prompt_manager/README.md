@@ -5,13 +5,13 @@ Dodawanie nowego szablonu jest bardzo proste – **nie musisz edytować żadnego
 
 ## Gdzie wrzucać pliki
 
-Wszystkie szablony trzymamy w folderze:  
+Wszystkie szablony trzymamy w folderze:
 `data/prompts/`
 
 
 ## Jak nazwać plik
 
-Nazwa pliku = nazwa szablonu (małe litery, bez spacji, myślniki lub podkreślniki).  
+Nazwa pliku = nazwa szablonu (małe litery, bez spacji, myślniki lub podkreślniki).
 Przykład:  
 `multiple_choice.json` → używasz go jako `manager.generate("multiple_choice", ...)`
 
@@ -26,6 +26,7 @@ Każdy plik **musi** mieć dokładnie dwa klucze:
   "user":   "Szablon pytania z miejscami na zmienne w nawiasach klamrowych {zmienna}"
 }
 
+
 Przykład poprawnego pliku:
 json
 
@@ -33,6 +34,7 @@ json
   "system": "Jesteś precyzyjnym asystentem quizowym. Odpowiadaj tylko pytaniem i opcjami.",
   "user":   "Stwórz pytanie wielokrotnego wyboru na temat {temat}. Trudność: {poziom}."
 }
+
 
 Jakie zmienne możesz używać:
 W polu "user" możesz wstawiać dowolne zmienne w formacie {nazwa_zmiennej}.
@@ -57,24 +59,12 @@ Dostępne zmienne zależą od tego, co przekażesz w **kwargs.
 
 ## Najczęstsze błędy:
 
-- Brak klucza "system" lub "user" → szablon nie zostanie wczytany  
-- Błędna składnia JSON → komunikat w konsoli przy ładowaniu  
-- Spacja lub wielka litera w nazwie pliku → szablon nie zostanie rozpoznany  
+- Brak klucza "system" lub "user" → szablon nie zostanie wczytany
+- Błędna składnia JSON → komunikat w konsoli przy ładowaniu
+- Spacja lub wielka litera w nazwie pliku → szablon nie zostanie rozpoznany
 - Plik nie jest zapisany w UTF-8 → może pojawić się błąd dekodowania
 
 
 Gotowe! Dodaj swój szablon i zrób pull request :)
-
-
-
-
-
-
-
-
-
-
-
-
 
 
