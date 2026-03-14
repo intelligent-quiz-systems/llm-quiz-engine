@@ -1,3 +1,5 @@
 groq>=0.6.0
 streamlit>=1.55.0
 python-dotenv
+openai>=2.28.0
+pydantic>=2.12.5

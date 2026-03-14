@@ -24,8 +24,8 @@ cp .env.example .env
 Then open the `.env` file and set your API key:
 
 ```
-OPENAI_API_KEY=your_api_key_here
-OPENAI_BASE_URL=https://api.groq.com/openai/v1
+GROQ_API_KEY=your_groq_api_key_here
+GROQ_BASE_URL="https://api.groq.com/openai/v1"
 ```
 
 ### 3. Start the Application in Browser Mode
