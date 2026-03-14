@@ -29,7 +29,7 @@ from utils import translate_difficulty_pl_to_en
 def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> str | None:
     system_prompt = (
         "You are a quiz generator. "
-        "Generate quiz data strictly matching the schema."
+        "Generate quiz in JSON format with data strictly matching the schema."
     )
 
     user_prompt = (
