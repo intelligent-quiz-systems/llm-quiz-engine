@@ -25,27 +25,33 @@ Każdy plik **musi** mieć dokładnie dwa klucze:
   "system": "Instrukcja systemowa dla modelu (kim jest asystent, jak ma odpowiadać)",
   "user":   "Szablon pytania z miejscami na zmienne w nawiasach klamrowych {zmienna}"
 }
+```
 
 
-Przykład poprawnego pliku:
-json
+## Przykład poprawnego pliku
 
+```json
 {
   "system": "Jesteś precyzyjnym asystentem quizowym. Odpowiadaj tylko pytaniem i opcjami.",
   "user":   "Stwórz pytanie wielokrotnego wyboru na temat {temat}. Trudność: {poziom}."
 }
+```
 
 
-Jakie zmienne możesz używać:
+## Jakie zmienne możesz używać
+
 W polu "user" możesz wstawiać dowolne zmienne w formacie {nazwa_zmiennej}.
 
 
-Przykład użycia w kodzie python:
 
+## Przykład użycia w kodzie 
+
+```python
 manager.generate("multiple_choice", temat="sztuczna inteligencja", poziom="łatwy")
+```
+
 
 Dostępne zmienne zależą od tego, co przekażesz w **kwargs.
-
 
 
 ## Jak przetestować swój szablon
