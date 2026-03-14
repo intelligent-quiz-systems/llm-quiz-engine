@@ -67,10 +67,7 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> str | No
 
 if __name__ == "__main__":
     quiz = generate_quiz_2(
-        topic="Python basics",
-        difficulty="easy",
+        topic="Postawy pythona",
+        difficulty="Średni",
         num_questions=5
     )
-
-    if quiz:
-        print(quiz)
