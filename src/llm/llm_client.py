@@ -26,14 +26,20 @@ def run_prompt(system_prompt: str, user_prompt: str, response_model: type[BaseMo
     Returns the result as JSON (dict).
     """
 
+    llm_model = "openai/gpt-oss-120b" #"openai/gpt-oss-20b"
+
     response = client.responses.parse(
-        model="openai/gpt-oss-20b",
+        model=llm_model,
         input=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
         text_format=response_model,
     )
+
+    print("\n===== RAW LLM RESPONSE =====")
+    print(response)
+    
 
     parsed_obj = response.output_parsed
 
