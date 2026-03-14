@@ -53,8 +53,7 @@ Dostępne zmienne zależą od tego, co przekażesz w **kwargs.
 1. Dodaj plik .json do data/prompts/
 2. Zrób commit i push na swoją gałąź
 3. Uruchom test_manager.py (lub własny skrypt)
-4. Sprawdź, czy szablon pojawił się na liście:
-5. Dostępne szablony promptów: [...]
+4. Sprawdź, czy szablon pojawił się na liście: Dostępne szablony promptów: [...]
 
 
 ## Najczęstsze błędy:
