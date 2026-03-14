@@ -28,16 +28,45 @@ from utils import translate_difficulty_pl_to_en
 
 def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> str | None:
     system_prompt = (
-        "You are a quiz generator. "
-        "Generate quiz in JSON format with data strictly matching the schema."
+    """
+        You are a quiz generator.
+
+        You must return ONLY valid JSON.
+        Do not include explanations, comments, markdown or text outside JSON.
+
+        The JSON must strictly follow this structure:
+
+        {
+        "questions": [
+            {
+            "question": "string",
+            "options": ["string", "string", "string", "string"],
+            "correct_index": 0
+            }
+        ]
+        }
+
+        Rules:
+        - options must contain exactly 4 answers
+        - correct_index must be an integer from 0 to 3
+        - return exactly the requested number of questions
+    """
     )
 
     user_prompt = (
-        f"Generate a quiz about {topic} in JSON format in Polish."
-        f"Difficulty: {translate_difficulty_pl_to_en(difficulty)}. "
-        f"The quiz must contain exactly {num_questions} questions. "
-        "Each question must have exactly 4 options "
-        "and a correct_index from 0 to 3."
+       f"""
+        Generate a quiz in Polish.
+
+        Topic: {topic}
+        Difficulty: {translate_difficulty_pl_to_en(difficulty)}
+
+        Requirements:
+        - exactly {num_questions} questions
+        - each question must have exactly 4 options
+        - correct_index must be between 0 and 3
+
+        Return ONLY JSON.
+        """
     )
 
     try:
