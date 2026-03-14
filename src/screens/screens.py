@@ -11,6 +11,8 @@ OPTION_LABELS = ["A", "B", "C", "D", "E", "F"]
 DEFAULT_QUESTION_COUNT = 5
 DEFAULT_TIME_LIMIT_MINUTES = 10
 DEFAULT_TOPIC = "Podstawy Pythona"
+MAX_QUESTION_COUNT = 20
+MAX_TIME_LIMIT_MINUTES = 120
 
 
 class QuizDifficulty(Enum):
@@ -181,7 +183,7 @@ def render_config_screen():
     question_count = st.number_input(
         "Liczba pytań",
         min_value=1,
-        max_value=200,
+        max_value=MAX_QUESTION_COUNT,
         value=DEFAULT_QUESTION_COUNT,
         step=1,
     )
@@ -194,7 +196,7 @@ def render_config_screen():
     time_limit = st.number_input(
         "Limit czasu (minuty)",
         min_value=1,
-        max_value=120,
+        max_value=MAX_TIME_LIMIT_MINUTES,
         value=DEFAULT_TIME_LIMIT_MINUTES,
         step=1,
     )
