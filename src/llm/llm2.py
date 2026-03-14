@@ -33,7 +33,7 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> str | No
     )
 
     user_prompt = (
-        f"Generate a quiz about {topic} in Polish. "
+        f"Generate a quiz about {topic} in JSON format in Polish."
         f"Difficulty: {translate_difficulty_pl_to_en(difficulty)}. "
         f"The quiz must contain exactly {num_questions} questions. "
         "Each question must have exactly 4 options "
