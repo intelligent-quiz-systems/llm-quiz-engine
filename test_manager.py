@@ -7,7 +7,17 @@ def main():
     # Tworzymy instancję managera (ładuje prompty z data/prompts)
     manager = PromptManager()
 
-    print("Dostępne szablony promptów:", list(manager.prompts.keys()))
+    # Ładniejsze wyświetlanie listy szablonów w formie tabelki
+    templates = manager.list_templates()  # posortowane alfabetycznie
+    print("\n=== Dostępne szablony promptów ===")
+    if not templates:
+        print("Brak szablonów – sprawdź katalog data/prompts/")
+    else:
+        print("Lp. | Nazwa szablonu")
+        print("----|-----------------")
+        for i, template in enumerate(templates, 1):
+            print(f"{i:3} | {template}")
+        print(f"\nŁącznie: {len(templates)} szablonów\n")
 
     # Przykładowe pytanie wielokrotnego wyboru
     print("\n=== Test 1: Pytanie wielokrotnego wyboru ===")
