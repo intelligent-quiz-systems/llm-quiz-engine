@@ -4,7 +4,8 @@ from typing import Dict, Any, Optional
 
 from .loader import load_prompts_from_directory
 from .exceptions import PromptNotFoundError
-from .groq_client import GroqClient  # ← ważny import!
+from .groq_client import GroqClient
+from .vision import VisionClient  # ← dodany import!
 
 
 class PromptManager:
@@ -16,7 +17,7 @@ class PromptManager:
     def __init__(self, prompts_dir: str | Path = "data/prompts", api_key: Optional[str] = None):
         self.prompts_dir = Path(prompts_dir)
         self.prompts: Dict[str, Dict[str, Any]] = {}
-        self.groq = GroqClient(api_key=api_key)  # ← tutaj inicjujemy Groq!
+        self.groq = GroqClient(api_key=api_key)
         self.load_prompts()
 
     def load_prompts(self) -> None:
@@ -72,9 +73,42 @@ class PromptManager:
         if not template:
             raise PromptNotFoundError(template_name)
 
-        # Podstawiamy opis obrazu + pozostałe parametry
         prompt = self.build_prompt(template_name, opis_obrazu=opis_obrazu, **kwargs)
         if not prompt:
             return None
 
         return self.groq.generate_response(prompt)
+
+    def list_templates(self, sort: bool = True) -> list[str]:
+        """
+        Zwraca listę nazw wszystkich dostępnych szablonów promptów.
+        """
+        templates = list(self.prompts.keys())
+        if sort:
+            templates.sort()
+        return templates
+
+    def generate_from_image(
+        self,
+        image_path: str | Path,
+        model: str = "llama-4-scout-17b-16e-instruct",
+        temat: str = "ogólny",
+        poziom: str = "średni"
+    ) -> Optional[str]:
+        """
+        Generuje pytanie quizowe bezpośrednio z obrazu (end-to-end vision na Groq).
+        """
+        try:
+            vision = VisionClient()
+            return vision.generate_question_from_image(
+                image_path=image_path,
+                model=model,
+                temat=temat,
+                poziom=poziom
+            )
+        except FileNotFoundError as e:
+            print(f"Błąd: nie znaleziono obrazu {image_path}")
+            return None
+        except Exception as e:
+            print(f"Błąd podczas generowania z obrazu: {e}")
+            return None
