@@ -1,3 +1,6 @@
+# Obsługa wizji (end-to-end z obrazów) – wyłączona na razie (brak dostępu do modelu)
+# Można włączyć po zmianie modelu / klucza API
+
 # src/prompt_manager/manager.py
 from pathlib import Path
 from typing import Dict, Any, Optional

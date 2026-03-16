@@ -45,5 +45,18 @@ def main():
     else:
         print("Nie udało się wygenerować pytania z opisem obrazu.")
 
+    # Test 3: Generowanie pytania bezpośrednio z obrazu (end-to-end vision) – wyłączony na razie
+    # print("\n=== Test 3: Generowanie pytania bezpośrednio z obrazu (end-to-end vision) ===")
+    # image_path = "C:/Users/xxx/Pictures/wulkan.jpg"  # ← zmień na prawdziwą ścieżkę do swojego obrazka jpg/png
+    # pytanie3 = manager.generate_from_image(
+    #     image_path=image_path,
+    #     temat="wulkany",
+    #     poziom="średni"
+    # )
+    # if pytanie3:
+    #     print(pytanie3)
+    # else:
+    #     print("Nie udało się wygenerować pytania z obrazu.")
+
 if __name__ == "__main__":
     main()
