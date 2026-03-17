@@ -10,9 +10,11 @@ from screens.screens import (
     DEFAULT_JSON,
 )
 
-from validations.validate_quiz import validate_quiz
-# TODO: from quiz_service import generate_quiz
+# alternative LLM communication implementations
+from llm.llm import generate_quiz
+from llm.llm2 import generate_quiz_2
 
+from validations.validate_quiz import validate_quiz
 
 st.set_page_config(page_title="Quiz Generator", page_icon="🧠", layout="centered")
 
@@ -23,12 +25,20 @@ if st.session_state.app_step == "config":
     config = render_config_screen()
 
     if config and config.get("submitted"):
-        # TODO: zastąpić przez generate_quiz(config)
-        from llm.llm import generate_quiz
+        
+        difficulty_pl = str(config["difficulty"])
 
-        raw_quiz = generate_quiz(
+        difficulty_map = {
+            "Łatwy": "easy",
+            "Średni": "medium",
+            "Trudny": "hard"
+        }
+
+        difficulty_en = difficulty_map.get(difficulty_pl, difficulty_pl)      
+
+        raw_quiz = generate_quiz_2(
             config["topic"],
-            config["difficulty"],
+            difficulty_en,
             config["question_count"]
         )
 
