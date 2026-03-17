@@ -25,10 +25,20 @@ if st.session_state.app_step == "config":
     config = render_config_screen()
 
     if config and config.get("submitted"):
+        
+        difficulty_pl = str(config["difficulty"])
+
+        difficulty_map = {
+            "Łatwy": "easy",
+            "Średni": "medium",
+            "Trudny": "hard"
+        }
+
+        difficulty_en = difficulty_map.get(difficulty_pl, difficulty_pl)      
 
         raw_quiz = generate_quiz_2(
             config["topic"],
-            config["difficulty"],
+            difficulty_en,
             config["question_count"]
         )
 

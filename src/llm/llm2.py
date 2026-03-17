@@ -3,27 +3,13 @@ import sys
 from pathlib import Path
 from pydantic import ValidationError
 
-CURRENT_DIR = Path(__file__).resolve().parent      # src/llm
-SRC_DIR = CURRENT_DIR.parent                       # src
-
-if str(CURRENT_DIR) not in sys.path:
-    sys.path.append(str(CURRENT_DIR))
+SRC_DIR = Path(__file__).resolve().parents[1]  # src
 
 if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
 
-# Support both package import and direct script execution
-try:
-    from .llm_client import run_prompt
-except ImportError:
-    from llm_client import run_prompt
-
-try:
-    from .quiz_model import Quiz
-except ImportError:
-    from quiz_model import Quiz
-
-from utils import translate_difficulty_pl_to_en
+from llm.llm_client import run_prompt
+from llm.quiz_model import Quiz
 
 
 def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> str | None:
@@ -58,7 +44,7 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> str | No
         Generate a quiz in Polish.
 
         Topic: {topic}
-        Difficulty: {translate_difficulty_pl_to_en(difficulty)}
+        Difficulty: {difficulty}
 
         Requirements:
         - exactly {num_questions} questions
