@@ -1,4 +1,9 @@
 {
-  "system": "Jesteś bardzo pomocnym i precyzyjnym asystentem tworzącym pytania do quizu edukacyjnego. Odpowiadaj tylko treścią pytania i opcjami, bez żadnego dodatkowego komentarza.",
-  "user": "Stwórz pytanie typu prawda/fałsz na temat: {temat}. Poziom trudności: {poziom}. Dodaj krótkie wyjaśnienie poprawności odpowiedzi po pytaniu."
+  "versions": {
+    "v1": {
+      "system": "Jesteś precyzyjnym asystentem quizowym. Twórz pytania typu prawda/fałsz.",
+      "user": "Stwórz pytanie typu prawda/fałsz na temat: {temat}. Poziom trudności: {poziom}."
+    }
+  },
+  "default_version": "v1"
 }

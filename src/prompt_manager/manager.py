@@ -7,9 +7,9 @@ from .loader import load_prompts_from_directory
 
 class PromptManager:
     """
-    Czysty Prompt Manager – tylko ładuje i udostępnia szablony promptów.
-    Wspiera wersjonowanie promptów.
-    Komunikacja z LLM jest w module src/llm.
+    Czysty Prompt Manager – odpowiedzialny tylko za ładowanie i udostępnianie promptów.
+    Wspiera wersjonowanie promptów (v1, v2, ...).
+    Komunikacja z LLM odbywa się w module src/llm.
     """
 
     def __init__(self, prompts_dir: str | Path = "data/prompts"):
@@ -22,28 +22,43 @@ class PromptManager:
         self.prompts = load_prompts_from_directory(self.prompts_dir)
 
     def list_templates(self) -> list[str]:
-        """Zwraca listę wszystkich dostępnych szablonów"""
+        """Zwraca posortowaną listę wszystkich dostępnych szablonów"""
         return sorted(self.prompts.keys())
 
-    def get_prompt(self, template_name: str, version: str = "v1") -> Optional[Dict[str, Any]]:
+    def get_prompt(self, template_name: str, version: str = None) -> Optional[Dict[str, Any]]:
         """
-        Zwraca szablon promptu po nazwie i wersji.
-        Jeśli wersja nie istnieje, zwraca None.
+        Zwraca szablon promptu.
+        
+        Args:
+            template_name: nazwa szablonu (np. "multiple_choice")
+            version: wersja promptu (np. "v1", "v2"). Jeśli None - zwraca domyślną wersję.
         """
         template = self.prompts.get(template_name)
         if not template:
             return None
 
-        # Nowa struktura z wersjami
+        # Jeśli szablon ma strukturę z wersjami
         if "versions" in template and isinstance(template["versions"], dict):
+            if version is None:
+                version = template.get("default_version", "v1")
             return template["versions"].get(version)
 
-        # Stara struktura (bez wersjonowania) – zwracamy cały szablon
+        # Stara struktura (bez wersjonowania) - zwracamy cały szablon
         return template
 
+    def get_system_prompt(self, template_name: str, version: str = None) -> Optional[str]:
+        """Zwraca tylko część 'system' wybranego promptu"""
+        prompt = self.get_prompt(template_name, version)
+        return prompt.get("system") if prompt else None
+
+    def get_user_prompt(self, template_name: str, version: str = None) -> Optional[str]:
+        """Zwraca tylko część 'user' wybranego promptu"""
+        prompt = self.get_prompt(template_name, version)
+        return prompt.get("user") if prompt else None
+
     def get_default_version(self, template_name: str) -> str:
-        """Zwraca domyślną wersję szablonu (jeśli jest zdefiniowana)"""
+        """Zwraca domyślną wersję szablonu"""
         template = self.prompts.get(template_name)
         if template and "default_version" in template:
             return template["default_version"]
-        return "v1"  # domyślna wersja jeśli nie podano
+        return "v1"  # fallback

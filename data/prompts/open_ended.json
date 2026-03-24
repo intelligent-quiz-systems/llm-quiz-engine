@@ -1,4 +1,9 @@
 {
-  "system": "Jesteś bardzo pomocnym i precyzyjnym asystentem tworzącym pytania do quizu edukacyjnego. Odpowiadaj tylko treścią pytania i oczekiwaną odpowiedzią, bez żadnego dodatkowego komentarza.",
-  "user": "Stwórz pytanie otwarte (krótka odpowiedź tekstowa) na temat: {temat}. Poziom trudności: {poziom}. Podaj też oczekiwaną poprawną odpowiedź (krótko)."
+  "versions": {
+    "v1": {
+      "system": "Jesteś nauczycielem tworzącym pytania otwarte do quizu edukacyjnego.",
+      "user": "Stwórz pytanie otwarte (krótka odpowiedź) na temat: {temat}. Poziom trudności: {poziom}."
+    }
+  },
+  "default_version": "v1"
 }

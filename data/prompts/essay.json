@@ -1,4 +1,9 @@
 {
-  "system": "Jesteś bardzo pomocnym i precyzyjnym asystentem tworzącym pytania do quizu edukacyjnego. Odpowiadaj tylko treścią pytania i kryteriami oceny, bez żadnego dodatkowego komentarza.",
-  "user": "Stwórz pytanie typu wypracowanie (dłuższa odpowiedź tekstowa) na temat: {temat}. Poziom trudności: {poziom}. Podaj też przykładowe kryteria oceny odpowiedzi (3–5 punktów)."
+  "versions": {
+    "v1": {
+      "system": "Jesteś nauczycielem przygotowującym pytania eseistyczne.",
+      "user": "Stwórz pytanie eseistyczne (rozszerzona odpowiedź) na temat: {temat}. Poziom trudności: {poziom}."
+    }
+  },
+  "default_version": "v1"
 }
