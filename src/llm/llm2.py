@@ -11,10 +11,8 @@ if str(SRC_DIR) not in sys.path:
 from llm.llm_client import run_prompt
 from llm.quiz_model import Quiz
 
-
 def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> str | None:
-    system_prompt = (
-    """
+    system_prompt = """
         You are a quiz generator.
 
         You must return ONLY valid JSON.
@@ -23,24 +21,24 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> str | No
         The JSON must strictly follow this structure:
 
         {
-        "questions": [
+          "quiz_title": "string",
+          "questions": [
             {
-            "question": "string",
-            "options": ["string", "string", "string", "string"],
-            "correct_index": 0
+              "question": "string",
+              "options": ["string", "string", "string", "string"],
+              "correct_index": 0
             }
-        ]
+          ]
         }
 
         Rules:
+        - quiz_title must be a non-empty string
         - options must contain exactly 4 answers
         - correct_index must be an integer from 0 to 3
         - return exactly the requested number of questions
     """
-    )
 
-    user_prompt = (
-       f"""
+    user_prompt = f"""
         Generate a quiz in Polish.
 
         Topic: {topic}
@@ -50,25 +48,32 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> str | No
         - exactly {num_questions} questions
         - each question must have exactly 4 options
         - correct_index must be between 0 and 3
+        - include quiz_title
 
         Return ONLY JSON.
-        """
-    )
+    """
 
     try:
-        quiz_json = run_prompt(system_prompt, user_prompt, Quiz)
+        quiz_json = run_prompt(
+            system_prompt,
+            user_prompt,
+            Quiz,
+            requested_questions=num_questions,
+        )
+
 
         print("\n===== RESULT QUIZ JSON =====")
-        print(quiz_json )
+        print(quiz_json)
+
 
         # Validate returned JSON against the Pydantic model
         quiz = Quiz.model_validate(quiz_json)
 
-        formatted_quiz_json = json.dumps(quiz_json, indent=2, ensure_ascii=False) 
+        formatted_quiz_json = json.dumps(quiz_json, indent=2, ensure_ascii=False)
 
         print("\n===== VALIDATED QUIZ JSON =====")
-        print(formatted_quiz_json )
-        
+        print(formatted_quiz_json)
+
         return quiz_json
 
     except ValidationError as e:
