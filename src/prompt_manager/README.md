@@ -1,6 +1,7 @@
 # Prompt Manager – jak dodać własny szablon promptu
 
-Dodawanie nowego szablonu jest bardzo proste – nie musisz edytować żadnego kodu Pythona.
+Prompt Manager jest odpowiedzialny tylko za ładowanie i udostępnianie szablonów promptów.  
+Komunikacja z LLM odbywa się w module `src/llm`.
 
 
 
@@ -11,9 +12,9 @@ Wszystkie szablony trzymamy w folderze:
 
 
 
-## Nowa struktura z wersjonowaniem (od tej wersji)
+## Struktura z wersjonowaniem (aktualna)
 
-Każdy plik JSON ma teraz strukturę z wersjami:
+Od tej wersji każdy plik JSON ma strukturę wspierającą wersjonowanie:
 
 ```json
 {
@@ -30,6 +31,7 @@ Każdy plik JSON ma teraz strukturę z wersjami:
   "default_version": "v1"
 }
 ```
+
 
 
 ## Jak nazwać plik
@@ -50,16 +52,21 @@ prompt = manager.get_prompt("multiple_choice")
 prompt_v2 = manager.get_prompt("multiple_choice", version="v2")
 
 # Pobranie tylko części system lub user
-system = manager.get_system_prompt("multiple_choice")
-user = manager.get_user_prompt("multiple_choice", version="v2")
+system = manager.get_system_prompt("multiple_choice", "v1")
+user = manager.get_user_prompt("multiple_choice", "v2")
+
+# Lista dostępnych wersji szablonu
+versions = manager.list_versions("multiple_choice")
 ```
+
 
 
 ## Jak przetestować swój szablon
 
 1. Dodaj lub zaktualizuj plik .json w data/prompts/
 2. Uruchom python test_manager.py
-3. Sprawdź, czy szablon pojawił się na liście
+3. Sprawdź, czy szablon i jego wersje pojawiają się na liście
+
 
 
 
@@ -71,5 +78,8 @@ user = manager.get_user_prompt("multiple_choice", version="v2")
 
 
 
-Gotowe! Dodaj swój szablon i zrób pull request :)
+
+Gotowe! Dodaj swój szablon (lub nową wersję) i zrób pull request :)
+
+
 
