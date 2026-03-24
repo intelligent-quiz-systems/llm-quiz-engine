@@ -13,7 +13,10 @@ def main():
             print(f"{i:2d}. {template}")
         print(f"\nŁącznie: {len(templates)} szablonów\n")
 
-    print("Prompt Manager gotowy do użycia w module llm.")
+    # Przykład użycia
+    print("Przykład pobrania promptu:")
+    prompt = manager.get_prompt("multiple_choice")
+    print(f"multiple_choice → {prompt is not None}")
 
 if __name__ == "__main__":
     main()
