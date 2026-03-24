@@ -10,13 +10,13 @@ def main():
         print("Brak szablonów – sprawdź katalog data/prompts/")
     else:
         for i, template in enumerate(templates, 1):
-            print(f"{i:2d}. {template}")
+            default_version = manager.get_default_version(template)
+            print(f"{i:2d}. {template} (domyślna wersja: {default_version})")
         print(f"\nŁącznie: {len(templates)} szablonów\n")
 
-    # Przykład użycia
-    print("Przykład pobrania promptu:")
-    prompt = manager.get_prompt("multiple_choice")
-    print(f"multiple_choice → {prompt is not None}")
+    # Przykład pobrania promptu z wersją
+    prompt_v1 = manager.get_prompt("multiple_choice", version="v1")
+    print(f"multiple_choice v1 istnieje: {prompt_v1 is not None}")
 
 if __name__ == "__main__":
     main()

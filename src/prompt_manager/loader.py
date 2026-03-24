@@ -6,7 +6,8 @@ from typing import Dict, Any
 
 def load_prompts_from_directory(directory: Path) -> Dict[str, Dict[str, Any]]:
     """
-    Wczytuje wszystkie pliki .json z katalogu i zwraca słownik {nazwa_pliku: zawartość}
+    Wczytuje wszystkie pliki .json z katalogu i zwraca słownik {nazwa_szablonu: zawartość}
+    Obsługuje zarówno stare jak i nowe formaty z wersjonowaniem.
     """
     prompts = {}
 
@@ -14,21 +15,11 @@ def load_prompts_from_directory(directory: Path) -> Dict[str, Dict[str, Any]]:
         try:
             with file_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            
-            # Walidacja – sprawdzamy, czy plik ma wymaganą strukturę
+
             if not isinstance(data, dict):
-                print(f"✗ Błąd w pliku {file_path.name}: zawartość nie jest słownikiem (dict)")
+                print(f"✗ Błąd w pliku {file_path.name}: zawartość nie jest słownikiem")
                 continue
-            
-            if "system" not in data or "user" not in data:
-                print(f"✗ Błąd w pliku {file_path.name}: brakuje wymaganego klucza 'system' lub 'user'")
-                continue
-            
-            if not isinstance(data["system"], str) or not isinstance(data["user"], str):
-                print(f"✗ Błąd w pliku {file_path.name}: klucze 'system' i 'user' muszą być tekstem (string)")
-                continue
-            
-            # Jeśli wszystko OK – dodajemy
+
             name = file_path.stem
             prompts[name] = data
             print(f"✓ Wczytano szablon: {name}")

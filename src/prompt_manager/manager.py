@@ -8,7 +8,8 @@ from .loader import load_prompts_from_directory
 class PromptManager:
     """
     Czysty Prompt Manager – tylko ładuje i udostępnia szablony promptów.
-    Nie komunikuje się z LLM (to jest w module src/llm).
+    Wspiera wersjonowanie promptów.
+    Komunikacja z LLM jest w module src/llm.
     """
 
     def __init__(self, prompts_dir: str | Path = "data/prompts"):
@@ -24,22 +25,25 @@ class PromptManager:
         """Zwraca listę wszystkich dostępnych szablonów"""
         return sorted(self.prompts.keys())
 
-    def get_prompt(self, template_name: str) -> Optional[Dict[str, Any]]:
-        """Zwraca szablon promptu po nazwie"""
-        return self.prompts.get(template_name)
-
-    def get_prompt_version(self, template_name: str, version: str = "v1") -> Optional[Dict[str, Any]]:
+    def get_prompt(self, template_name: str, version: str = "v1") -> Optional[Dict[str, Any]]:
         """
-        Zwraca konkretną wersję promptu.
-        Przykład: get_prompt_version("multiple_choice", "v2")
+        Zwraca szablon promptu po nazwie i wersji.
+        Jeśli wersja nie istnieje, zwraca None.
         """
-        template = self.get_prompt(template_name)
+        template = self.prompts.get(template_name)
         if not template:
             return None
-        
-        # Jeśli szablon ma już wersje (słownik wersji)
-        if "versions" in template and version in template["versions"]:
-            return template["versions"][version]
-        
-        # Jeśli szablon jest stary (bez wersjonowania) – zwracamy cały szablon
+
+        # Nowa struktura z wersjami
+        if "versions" in template and isinstance(template["versions"], dict):
+            return template["versions"].get(version)
+
+        # Stara struktura (bez wersjonowania) – zwracamy cały szablon
         return template
+
+    def get_default_version(self, template_name: str) -> str:
+        """Zwraca domyślną wersję szablonu (jeśli jest zdefiniowana)"""
+        template = self.prompts.get(template_name)
+        if template and "default_version" in template:
+            return template["default_version"]
+        return "v1"  # domyślna wersja jeśli nie podano
