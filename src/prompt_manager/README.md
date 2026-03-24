@@ -3,10 +3,12 @@
 Dodawanie nowego szablonu jest bardzo proste – nie musisz edytować żadnego kodu Pythona.
 
 
+
 ## Gdzie wrzucać pliki
 
 Wszystkie szablony trzymamy w folderze:  
 `data/prompts/`
+
 
 
 ## Nowa struktura z wersjonowaniem (od tej wersji)
@@ -36,6 +38,7 @@ Nazwa pliku = nazwa szablonu (małe litery, myślniki lub podkreślniki).
 Przykład: multiple_choice.json
 
 
+
 ## Jak używać w kodzie
 ```
 manager = PromptManager()
@@ -54,9 +57,10 @@ user = manager.get_user_prompt("multiple_choice", version="v2")
 
 ## Jak przetestować swój szablon
 
-1.Dodaj lub zaktualizuj plik .json w data/prompts/
-2.Uruchom python test_manager.py
-3.Sprawdź, czy szablon pojawił się na liście
+1. Dodaj lub zaktualizuj plik .json w data/prompts/
+2. Uruchom python test_manager.py
+3. Sprawdź, czy szablon pojawił się na liście
+
 
 
 ## Najczęstsze błędy
@@ -64,6 +68,7 @@ user = manager.get_user_prompt("multiple_choice", version="v2")
 - Brak klucza "versions" lub "default_version"
 - Błędna składnia JSON
 - Spacja lub wielka litera w nazwie pliku
+
 
 
 Gotowe! Dodaj swój szablon i zrób pull request :)
