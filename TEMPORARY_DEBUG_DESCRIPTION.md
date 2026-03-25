@@ -15,6 +15,7 @@ Obecnie logujemy:
 
 np.:
 
+```text
 ===== REQUEST INFO =====
 requested_questions: 42
 system_prompt_chars: 697
@@ -56,6 +57,7 @@ Very similar questions: Q31 and Q47 (score=0.90)
 
 ===== RAW LLM RESPONSE =====
 …
+```
 
 ## Co widać z testów
 
