@@ -1,0 +1,83 @@
+description: Evale promptu quizowego dla Groq
+
+providers:
+  - id: openai:chat:openai/gpt-oss-120b
+    config:
+      apiBaseUrl: https://api.groq.com/openai/v1
+      apiKeyEnvar: GROQ_API_KEY
+      temperature: 0.7
+
+prompts:
+  - |
+    You are a JSON generator.
+
+    Generate a quiz in Polish about: {{topic}}
+    Difficulty level: {{difficulty}}
+    Number of questions: {{num_questions}}
+
+    Return ONLY valid JSON.
+    Do not include markdown.
+    Do not include explanations.
+    Do not include text before or after JSON.
+
+    Use exactly this structure:
+
+    {
+      "quiz_title": "{{topic}}",
+      "questions": [
+        {
+          "question": "string",
+          "options": ["string", "string", "string", "string"],
+          "correct_index": 0
+        }
+      ]
+    }
+
+    Requirements:
+    - generate exactly {{num_questions}} questions
+    - each question must have exactly 4 options
+    - correct_index must be an integer from 0 to 3
+    - all content must be in Polish
+    - difficulty must match: {{difficulty}}
+    - questions must stay strictly within the topic: {{topic}}
+
+tests:
+  - description: Python easy 3 pytania
+    vars:
+      topic: Python
+      difficulty: easy
+      num_questions: 3
+    assert:
+      - type: is-json
+      - type: javascript
+        value: |
+          const data = JSON.parse(output);
+          return data.quiz_title === context.vars.topic;
+      - type: javascript
+        value: |
+          const data = JSON.parse(output);
+          return Array.isArray(data.questions) && data.questions.length === Number(context.vars.num_questions);
+      - type: javascript
+        value: |
+          const data = JSON.parse(output);
+          return data.questions.every(q =>
+            typeof q.question === 'string' &&
+            Array.isArray(q.options) &&
+            q.options.length === 4 &&
+            q.options.every(opt => typeof opt === 'string' && opt.trim().length > 0) &&
+            Number.isInteger(q.correct_index) &&
+            q.correct_index >= 0 &&
+            q.correct_index <= 3
+          );
+
+  - description: Historia Polski medium 5 pytań
+    vars:
+      topic: Historia Polski
+      difficulty: medium
+      num_questions: 5
+    assert:
+      - type: is-json
+      - type: javascript
+        value: |
+          const data = JSON.parse(output);
+          return data.questions.length === Number(context.vars.num_questions);
