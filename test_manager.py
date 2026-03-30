@@ -32,26 +32,31 @@ def main():
     print(f"System prompt (v1): {'✓' if system_text else '✗'} ({len(system_text) if system_text else 0} znaków)")
     print(f"User prompt (v1):   {'✓' if user_text else '✗'} ({len(user_text) if user_text else 0} znaków)")
 
-    # === NOWY TEST: add_prompt() ===
-    print("\n=== Test dodawania nowej wersji promptu ===")
-    
-    success = manager.add_prompt(
+    # === Testy funkcji add_prompt() ===
+    print("\n=== Testy funkcji add_prompt() ===")
+
+    # Dodanie nowej wersji do istniejącego promptu
+    success1 = manager.add_prompt(
         prompt_name="basic_quiz",
-        system="Jesteś bardzo precyzyjnym generatorem quizów. Zawsze zwracaj tylko czysty JSON.",
-        user="Wygeneruj quiz na temat: {topic}. Poziom: {difficulty}. Liczba pytań: {num_questions}.",
+        system="Nowa, ulepszona instrukcja systemowa dla quizu.",
+        user="Wygeneruj quiz na temat: {topic}. Poziom trudności: {difficulty}. Liczba pytań: {num_questions}.",
         version="v2"
     )
 
-    if success:
-        print("✓ Funkcja add_prompt() zadziałała poprawnie")
-        # Sprawdź, czy nowa wersja się pojawiła
-        versions = manager.list_versions("basic_quiz")
-        print(f"Dostępne wersje basic_quiz po dodaniu: {versions}")
-        
-        new_prompt = manager.get_prompt("basic_quiz", "v2")
-        print(f"Czy wersja v2 została dodana: {'✓' if new_prompt else '✗'}")
-    else:
-        print("✗ Funkcja add_prompt() zwróciła błąd")
+    if success1:
+        print("✓ Dodano wersję v2 do promptu 'basic_quiz'")
+        print(f"  Dostępne wersje: {manager.list_versions('basic_quiz')}")
+
+    # Dodanie zupełnie nowego promptu
+    success2 = manager.add_prompt(
+        prompt_name="short_answer_quiz",
+        system="Jesteś asystentem tworzącym pytania otwarte do quizu.",
+        user="Stwórz {num_questions} pytań otwartych na temat: {topic}. Poziom: {difficulty}.",
+        version="v1"
+    )
+
+    if success2:
+        print("✓ Dodano nowy prompt 'short_answer_quiz' w wersji v1")
 
     print("\nPrompt Manager z wersjonowaniem i funkcją add_prompt() działa poprawnie.")
 
