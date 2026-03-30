@@ -1,6 +1,7 @@
 # src/prompt_manager/manager.py
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+import json
 
 from .loader import load_prompts_from_directory
 
@@ -8,8 +9,9 @@ from .loader import load_prompts_from_directory
 class PromptManager:
     """
     Prompt Manager – odpowiedzialny tylko za zarządzanie promptami.
-    Wspiera wersjonowanie: v1, v2, v3... 
-    Umożliwia dodawanie nowych wersji promptów oraz powrót do poprzednich.
+    Wspiera wersjonowanie (v1, v2, ...).
+    Umożliwia programistyczne dodawanie nowych promptów i wersji.
+    Komunikacja z LLM odbywa się w module src/llm.
     """
 
     def __init__(self, prompts_dir: str | Path = "data/prompts"):
@@ -22,7 +24,7 @@ class PromptManager:
         self.prompts = load_prompts_from_directory(self.prompts_dir)
 
     def list_templates(self) -> List[str]:
-        """Zwraca posortowaną listę wszystkich szablonów"""
+        """Zwraca posortowaną listę wszystkich dostępnych szablonów"""
         return sorted(self.prompts.keys())
 
     def list_versions(self, template_name: str) -> List[str]:
@@ -48,13 +50,12 @@ class PromptManager:
         if not template:
             return None
 
-        # Nowa struktura z wersjonowaniem
         if "versions" in template and isinstance(template["versions"], dict):
             if version is None:
                 version = self.get_default_version(template_name)
             return template["versions"].get(version)
 
-        # Stara struktura (bez wersjonowania)
+        # Stara struktura bez wersjonowania
         return template
 
     def get_system_prompt(self, template_name: str, version: str = None) -> Optional[str]:
@@ -66,3 +67,52 @@ class PromptManager:
         """Zwraca tylko część 'user' wybranego promptu"""
         prompt = self.get_prompt(template_name, version)
         return prompt.get("user") if prompt else None
+
+    def add_prompt(
+        self,
+        prompt_name: str,
+        system: str,
+        user: str,
+        version: str = "v1"
+    ) -> bool:
+        """
+        Dodaje nowy prompt lub nową wersję istniejącego promptu.
+        Jeśli plik JSON nie istnieje – tworzy go automatycznie.
+        """
+        try:
+            file_path = self.prompts_dir / f"{prompt_name}.json"
+
+            # Wczytaj istniejący plik lub utwórz nowy
+            if file_path.exists():
+                with file_path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+            else:
+                data = {"versions": {}, "default_version": version}
+
+            # Upewnij się, że istnieje klucz "versions"
+            if "versions" not in data or not isinstance(data["versions"], dict):
+                data["versions"] = {}
+
+            # Dodaj / nadpisz wersję
+            data["versions"][version] = {
+                "system": system.strip(),
+                "user": user.strip()
+            }
+
+            # Ustaw domyślną wersję jeśli to pierwsza wersja
+            if data.get("default_version") is None:
+                data["default_version"] = version
+
+            # Zapisz plik z ładnym formatowaniem
+            with file_path.open("w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+            # Odśwież prompty w pamięci
+            self.load_prompts()
+
+            print(f"✓ Dodano prompt '{prompt_name}' w wersji '{version}'")
+            return True
+
+        except Exception as e:
+            print(f"✗ Błąd podczas dodawania promptu '{prompt_name}': {e}")
+            return False

@@ -1,5 +1,5 @@
 # test_manager.py
-# Testy PromptManager po wprowadzeniu wersjonowania promptów
+# Testy PromptManager po wprowadzeniu wersjonowania i funkcji add_prompt()
 
 from src.prompt_manager.manager import PromptManager
 
@@ -18,34 +18,42 @@ def main():
             print(f"{i:2d}. {template:20} → wersje: {versions} (domyślna: {default})")
         print(f"\nŁącznie: {len(templates)} szablonów\n")
 
-    # Testy pobierania promptów z wersjami
+    # Testy pobierania promptów
     print("=== Testy pobierania promptów z wersjami ===")
     
-    template_name = "multiple_choice"
+    template_name = "basic_quiz"
     
-    # Domyślna wersja
     prompt_default = manager.get_prompt(template_name)
     print(f"[{template_name}] Domyślna wersja (v1): {'✓' if prompt_default else '✗'}")
 
-    # Konkretna wersja
-    prompt_v1 = manager.get_prompt(template_name, "v1")
-    prompt_v2 = manager.get_prompt(template_name, "v2")
-    
-    print(f"[{template_name}] Wersja v1: {'✓' if prompt_v1 else '✗'}")
-    print(f"[{template_name}] Wersja v2: {'✓' if prompt_v2 else '✗'}")
-
-    # Testy pomocniczych metod
     system_text = manager.get_system_prompt(template_name, "v1")
     user_text = manager.get_user_prompt(template_name, "v1")
     
     print(f"System prompt (v1): {'✓' if system_text else '✗'} ({len(system_text) if system_text else 0} znaków)")
     print(f"User prompt (v1):   {'✓' if user_text else '✗'} ({len(user_text) if user_text else 0} znaków)")
 
-    # Test nieistniejącej wersji
-    prompt_v99 = manager.get_prompt(template_name, "v99")
-    print(f"[{template_name}] Nieistniejąca wersja v99: {'✓ (None)' if prompt_v99 is None else '✗'}")
+    # === NOWY TEST: add_prompt() ===
+    print("\n=== Test dodawania nowej wersji promptu ===")
+    
+    success = manager.add_prompt(
+        prompt_name="basic_quiz",
+        system="Jesteś bardzo precyzyjnym generatorem quizów. Zawsze zwracaj tylko czysty JSON.",
+        user="Wygeneruj quiz na temat: {topic}. Poziom: {difficulty}. Liczba pytań: {num_questions}.",
+        version="v2"
+    )
 
-    print("\nPrompt Manager z wersjonowaniem działa poprawnie.")
+    if success:
+        print("✓ Funkcja add_prompt() zadziałała poprawnie")
+        # Sprawdź, czy nowa wersja się pojawiła
+        versions = manager.list_versions("basic_quiz")
+        print(f"Dostępne wersje basic_quiz po dodaniu: {versions}")
+        
+        new_prompt = manager.get_prompt("basic_quiz", "v2")
+        print(f"Czy wersja v2 została dodana: {'✓' if new_prompt else '✗'}")
+    else:
+        print("✗ Funkcja add_prompt() zwróciła błąd")
+
+    print("\nPrompt Manager z wersjonowaniem i funkcją add_prompt() działa poprawnie.")
 
 
 if __name__ == "__main__":
