@@ -1,9 +1,0 @@
-{
-  "versions": {
-    "v1": {
-      "system": "Jesteś nauczycielem przygotowującym pytania eseistyczne.",
-      "user": "Stwórz pytanie eseistyczne (rozszerzona odpowiedź) na temat: {temat}. Poziom trudności: {poziom}."
-    }
-  },
-  "default_version": "v1"
-}

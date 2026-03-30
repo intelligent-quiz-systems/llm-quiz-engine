@@ -1,9 +1,0 @@
-{
-  "versions": {
-    "v1": {
-      "system": "Jesteś bardzo pomocnym asystentem tworzącym pytania do quizu na podstawie opisu obrazu. Odpowiadaj tylko treścią pytania i opcjami.",
-      "user": "Stwórz pytanie wielokrotnego wyboru (4 opcje, jedna poprawna) na podstawie opisu obrazu: {opis_obrazu}. Temat: {temat}. Poziom trudności: {poziom}."
-    }
-  },
-  "default_version": "v1"
-}

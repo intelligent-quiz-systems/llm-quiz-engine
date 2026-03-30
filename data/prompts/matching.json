@@ -1,9 +1,0 @@
-{
-  "versions": {
-    "v1": {
-      "system": "Jesteś precyzyjnym asystentem quizowym. Twórz pytania typu dopasowanie.",
-      "user": "Stwórz pytanie typu matching (dopasowanie) na temat: {temat}. Poziom trudności: {poziom}."
-    }
-  },
-  "default_version": "v1"
-}

@@ -1,9 +1,0 @@
-{
-  "versions": {
-    "v1": {
-      "system": "Jesteś precyzyjnym asystentem quizowym. Twórz pytania typu porządkowanie.",
-      "user": "Stwórz pytanie typu ordering (ułożenie w kolejności) na temat: {temat}. Poziom trudności: {poziom}."
-    }
-  },
-  "default_version": "v1"
-}

@@ -1,9 +1,0 @@
-{
-  "versions": {
-    "v1": {
-      "system": "Jesteś nauczycielem tworzącym pytania otwarte do quizu edukacyjnego.",
-      "user": "Stwórz pytanie otwarte (krótka odpowiedź) na temat: {temat}. Poziom trudności: {poziom}."
-    }
-  },
-  "default_version": "v1"
-}
