@@ -65,7 +65,7 @@ def test_generate_quiz_2_returns_quiz_json_on_success():
     system_prompt, user_prompt, response_model = fake_run_prompt.call_args.args
 
     assert "You are a quiz generator." in system_prompt
-    assert "Return ONLY valid JSON." in system_prompt
+    assert "You must return ONLY valid JSON." in system_prompt
     assert "options must contain exactly 4 answers" in system_prompt
 
     assert "Generate a quiz in Polish." in user_prompt
