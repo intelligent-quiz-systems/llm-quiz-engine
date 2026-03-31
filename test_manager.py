@@ -32,10 +32,9 @@ def main():
     print(f"System prompt (v1): {'✓' if system_text else '✗'} ({len(system_text) if system_text else 0} znaków)")
     print(f"User prompt (v1):   {'✓' if user_text else '✗'} ({len(user_text) if user_text else 0} znaków)")
 
-    # === Testy funkcji add_prompt() ===
+    # Testy funkcji add_prompt()
     print("\n=== Testy funkcji add_prompt() ===")
-
-    # Dodanie nowej wersji do istniejącego promptu
+    
     success1 = manager.add_prompt(
         prompt_name="basic_quiz",
         system="Nowa, ulepszona instrukcja systemowa dla quizu.",
@@ -47,7 +46,6 @@ def main():
         print("✓ Dodano wersję v2 do promptu 'basic_quiz'")
         print(f"  Dostępne wersje: {manager.list_versions('basic_quiz')}")
 
-    # Dodanie zupełnie nowego promptu
     success2 = manager.add_prompt(
         prompt_name="short_answer_quiz",
         system="Jesteś asystentem tworzącym pytania otwarte do quizu.",
@@ -58,7 +56,33 @@ def main():
     if success2:
         print("✓ Dodano nowy prompt 'short_answer_quiz' w wersji v1")
 
-    print("\nPrompt Manager z wersjonowaniem i funkcją add_prompt() działa poprawnie.")
+    # === Test build_from_template() ===
+    print("\n=== Test build_from_template() ===")
+    
+    built = manager.build_from_template(
+        prompt_name="basic_quiz",
+        topic="Python podstawy",
+        difficulty="Średni",
+        num_questions=5,
+        quiz_structure="""{
+  "questions": [
+    {
+      "question": "string",
+      "options": ["string", "string", "string", "string"],
+      "correct_index": 0
+    }
+  ]
+}"""
+    )
+    
+    if built:
+        print("✓ build_from_template() zadziałała poprawnie")
+        print(f"System: {built.get('system', '')[:120]}...")
+        print(f"User:   {built.get('user', '')[:180]}...")
+    else:
+        print("✗ build_from_template() nie zadziałała")
+
+    print("\nPrompt Manager z wersjonowaniem i funkcją build_from_template() działa poprawnie.")
 
 
 if __name__ == "__main__":

@@ -82,32 +82,26 @@ class PromptManager:
         try:
             file_path = self.prompts_dir / f"{prompt_name}.json"
 
-            # Wczytaj istniejący plik lub utwórz nowy
             if file_path.exists():
                 with file_path.open("r", encoding="utf-8") as f:
                     data = json.load(f)
             else:
                 data = {"versions": {}, "default_version": version}
 
-            # Upewnij się, że istnieje klucz "versions"
             if "versions" not in data or not isinstance(data["versions"], dict):
                 data["versions"] = {}
 
-            # Dodaj / nadpisz wersję
             data["versions"][version] = {
                 "system": system.strip(),
                 "user": user.strip()
             }
 
-            # Ustaw domyślną wersję jeśli to pierwsza wersja
             if data.get("default_version") is None:
                 data["default_version"] = version
 
-            # Zapisz plik z ładnym formatowaniem
             with file_path.open("w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
-            # Odśwież prompty w pamięci
             self.load_prompts()
 
             print(f"✓ Dodano prompt '{prompt_name}' w wersji '{version}'")
@@ -116,3 +110,30 @@ class PromptManager:
         except Exception as e:
             print(f"✗ Błąd podczas dodawania promptu '{prompt_name}': {e}")
             return False
+
+    def build_from_template(
+        self,
+        prompt_name: str,
+        version: str = None,
+        **kwargs
+    ) -> Optional[Dict[str, str]]:
+        """
+        Buduje prompt na podstawie szablonu i zwraca słownik z 'system' i 'user'.
+        Ułatwia korzystanie przy wołaniu LLM.
+        """
+        template = self.get_prompt(prompt_name, version)
+        if not template:
+            return None
+
+        system = template.get("system", "")
+        user_template = template.get("user", "")
+
+        try:
+            user = user_template.format(**kwargs)
+        except KeyError as e:
+            raise ValueError(f"Brak parametru {e} w szablonie '{prompt_name}' (wersja: {version or 'domyślna'})")
+
+        return {
+            "system": system,
+            "user": user
+        }
