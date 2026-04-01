@@ -212,12 +212,13 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
     accepted_questions = []
     final_quiz_title = topic
     batch_number = 1
+    locked_batch_size = INITIAL_BATCH_SIZE
 
     while len(accepted_questions) < num_questions:
         remaining_questions = num_questions - len(accepted_questions)
         accepted_batch = None
 
-        primary_batch_size = normalize_batch_size(INITIAL_BATCH_SIZE, remaining_questions)
+        primary_batch_size = normalize_batch_size(locked_batch_size, remaining_questions)
         fallback_batch_size = normalize_batch_size(FALLBACK_BATCH_SIZE, remaining_questions)
 
         attempted_batch_size = primary_batch_size
@@ -236,6 +237,7 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
             print(f"attempt_label: {attempt_label}")
             print(f"remaining_questions: {remaining_questions}")
             print(f"trying_batch_size: {attempted_batch_size}")
+            print(f"locked_batch_size: {locked_batch_size}")
 
             batch_result = generate_quiz_batch(topic, difficulty, attempted_batch_size)
 
@@ -257,13 +259,22 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
 
             if (
                 attempted_batch_size == primary_batch_size
-                and fallback_batch_size < primary_batch_size
+                and primary_batch_size > fallback_batch_size
+                and fallback_batch_size > 0
             ):
                 print("\n===== BATCH FALLBACK =====")
                 print(f"batch_number: {batch_number}")
                 print(f"fallback_reason: {reject_reason}")
                 print(f"fallback_from: {attempted_batch_size}")
                 print(f"fallback_to: {fallback_batch_size}")
+
+                if locked_batch_size > FALLBACK_BATCH_SIZE:
+                    locked_batch_size = FALLBACK_BATCH_SIZE
+
+                    print("\n===== SAFE BATCH MODE LOCKED =====")
+                    print(f"batch_number: {batch_number}")
+                    print(f"locked_batch_size: {locked_batch_size}")
+                    print("note: all next batches in this generation will stay at 5 or less")
 
                 attempted_batch_size = fallback_batch_size
             else:
@@ -308,6 +319,7 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
         print(f"remaining_questions: {remaining_questions}")
         print(f"returned_questions: {returned_questions}")
         print(f"output_tokens: {output_tokens}")
+        print(f"locked_batch_size_after_accept: {locked_batch_size}")
 
         batch_number += 1
 
