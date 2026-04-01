@@ -1,4 +1,5 @@
 import json
+import time
 import streamlit as st
 
 from screens.screens import (
@@ -25,7 +26,6 @@ if st.session_state.app_step == "config":
     config = render_config_screen()
 
     if config and config.get("submitted"):
-        
         difficulty_pl = str(config["difficulty"])
 
         difficulty_map = {
@@ -34,7 +34,18 @@ if st.session_state.app_step == "config":
             "Trudny": "hard"
         }
 
-        difficulty_en = difficulty_map.get(difficulty_pl, difficulty_pl)      
+        difficulty_en = difficulty_map.get(difficulty_pl, difficulty_pl)
+
+        # Start pomiaru:
+        # liczymy od momentu wysłania danych użytkownika do modelu,
+        # czyli tuż przed uruchomieniem generate_quiz_2(...).
+        st.session_state.generation_started_at = time.perf_counter()
+        st.session_state.generation_input_topic = config["topic"]
+        st.session_state.generation_input_difficulty = difficulty_pl
+        st.session_state.generation_input_question_count = config["question_count"]
+        st.session_state.generation_summary_logged = False
+        st.session_state.generation_time_seconds = None
+        st.session_state.average_time_per_question_seconds = None
 
         raw_quiz = generate_quiz_2(
             config["topic"],
@@ -68,6 +79,38 @@ if st.session_state.app_step == "config":
         st.rerun()
 
 elif st.session_state.app_step == "quiz":
+    # Koniec pomiaru:
+    # logujemy czas przy pierwszym wejściu na ekran quizu,
+    # czyli praktycznie w momencie, gdy pytania mają się wyświetlić użytkownikowi.
+    if not st.session_state.get("generation_summary_logged", False):
+        started_at = st.session_state.get("generation_started_at")
+
+        if started_at is not None:
+            generation_time_seconds = time.perf_counter() - started_at
+
+            quiz_data = st.session_state.get("quiz_data")
+            generated_questions = 0
+            if isinstance(quiz_data, dict):
+                generated_questions = len(quiz_data.get("questions", []))
+
+            average_time_per_question = (
+                generation_time_seconds / generated_questions
+                if generated_questions > 0
+                else 0.0
+            )
+
+            st.session_state.generation_time_seconds = generation_time_seconds
+            st.session_state.average_time_per_question_seconds = average_time_per_question
+            st.session_state.generation_summary_logged = True
+
+            print("\n===== QUIZ GENERATION SUMMARY =====")
+            print(f"topic: {st.session_state.get('generation_input_topic', 'N/A')}")
+            print(f"difficulty: {st.session_state.get('generation_input_difficulty', 'N/A')}")
+            print(f"requested_questions: {st.session_state.get('generation_input_question_count', 'N/A')}")
+            print(f"generated_questions: {generated_questions}")
+            print(f"generation_time_seconds: {generation_time_seconds:.2f}")
+            print(f"average_time_per_question_seconds: {average_time_per_question:.2f}")
+
     render_quiz_screen(st.session_state.quiz_data, st.session_state.config)
 
 elif st.session_state.app_step == "results":
