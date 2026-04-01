@@ -4,7 +4,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-SRC_DIR = Path(__file__).resolve().parents[1]  # src
+SRC_DIR = Path(__file__).resolve().parents[1]
 
 if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
@@ -12,11 +12,19 @@ if str(SRC_DIR) not in sys.path:
 from llm.llm_client import run_prompt
 from llm.quiz_model import Quiz
 
-TARGET_OUTPUT_TOKENS = 1800
-HARD_MAX_OUTPUT_TOKENS = 2400
+HARD_MAX_OUTPUT_TOKENS = 2200
 DEFAULT_BATCH_QUESTION_LIMIT = 100
 INITIAL_BATCH_SIZE = 10
-FALLBACK_INITIAL_BATCH_SIZE = 6
+FALLBACK_BATCH_SIZE = 5
+
+# Przełączniki debugowe dla szczegółowych sekcji logów.
+# Tymczasowo wyłączone, ponieważ zaśmiecały terminal podczas bieżących testów.
+# Zostawione w kodzie, aby można je było łatwo ponownie włączyć w razie potrzeby.
+# Debug log toggles for verbose output sections.
+# Temporarily disabled because they cluttered terminal output during normal testing.
+# Kept in code for quick re-enabling if deeper diagnostics are needed later.
+SHOW_RESULT_QUIZ_JSON = False
+SHOW_VALIDATED_QUIZ_JSON = False
 
 
 def normalize_batch_size(batch_size: int, remaining_questions: int) -> int:
@@ -27,31 +35,11 @@ def normalize_batch_size(batch_size: int, remaining_questions: int) -> int:
     return min(batch_size, remaining_questions)
 
 
-def estimate_next_batch_size(
-    output_tokens: int | None,
-    returned_questions: int,
-    remaining_questions: int,
-) -> int:
-    if not output_tokens or returned_questions <= 0:
-        return normalize_batch_size(INITIAL_BATCH_SIZE, remaining_questions)
-
-    average_tokens_per_question = output_tokens / returned_questions
-    if average_tokens_per_question <= 0:
-        return normalize_batch_size(INITIAL_BATCH_SIZE, remaining_questions)
-
-    estimated_batch_size = round(TARGET_OUTPUT_TOKENS / average_tokens_per_question)
-    return normalize_batch_size(estimated_batch_size, remaining_questions)
-
-
 def reduce_batch_size(current_batch_size: int, remaining_questions: int) -> int:
     if current_batch_size <= 1:
         return 0
 
-    if current_batch_size > 8:
-        reduced = current_batch_size - 2
-    else:
-        reduced = current_batch_size - 1
-
+    reduced = current_batch_size - 1
     return normalize_batch_size(reduced, remaining_questions)
 
 
@@ -109,15 +97,17 @@ def generate_quiz_batch(topic: str, difficulty: str, num_questions: int) -> dict
         quiz_json = prompt_result["quiz"]
         output_tokens = prompt_result.get("output_tokens")
 
-        print("\n===== RESULT QUIZ JSON =====")
-        print(quiz_json)
+        if SHOW_RESULT_QUIZ_JSON:
+            print("\n===== RESULT QUIZ JSON =====")
+            print(quiz_json)
 
         Quiz.model_validate(quiz_json)
 
         formatted_quiz_json = json.dumps(quiz_json, indent=2, ensure_ascii=False)
 
-        print("\n===== VALIDATED QUIZ JSON =====")
-        print(formatted_quiz_json)
+        if SHOW_VALIDATED_QUIZ_JSON:
+            print("\n===== VALIDATED QUIZ JSON =====")
+            print(formatted_quiz_json)
 
         returned_questions = len(quiz_json.get("questions", []))
         if returned_questions != num_questions:
@@ -152,12 +142,15 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
 
     accepted_questions = []
     final_quiz_title = topic
-    remaining_questions = num_questions
-    current_batch_size = normalize_batch_size(INITIAL_BATCH_SIZE, remaining_questions)
 
-    while remaining_questions > 0:
+    while len(accepted_questions) < num_questions:
+        remaining_questions = num_questions - len(accepted_questions)
         accepted_batch = None
-        attempted_batch_size = current_batch_size
+
+        primary_batch_size = normalize_batch_size(INITIAL_BATCH_SIZE, remaining_questions)
+        fallback_batch_size = normalize_batch_size(FALLBACK_BATCH_SIZE, remaining_questions)
+
+        attempted_batch_size = primary_batch_size
 
         while attempted_batch_size > 0:
             print("\n===== BATCH SEARCH =====")
@@ -171,13 +164,10 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
                 break
 
             if (
-                len(accepted_questions) == 0
-                and attempted_batch_size == normalize_batch_size(INITIAL_BATCH_SIZE, remaining_questions)
+                attempted_batch_size == primary_batch_size
+                and fallback_batch_size < primary_batch_size
             ):
-                attempted_batch_size = normalize_batch_size(
-                    FALLBACK_INITIAL_BATCH_SIZE,
-                    remaining_questions,
-                )
+                attempted_batch_size = fallback_batch_size
             else:
                 attempted_batch_size = reduce_batch_size(
                     attempted_batch_size,
@@ -191,7 +181,6 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
         batch_quiz = accepted_batch["quiz"]
         batch_questions = batch_quiz.get("questions", [])
         output_tokens = accepted_batch.get("output_tokens")
-        returned_questions = accepted_batch.get("returned_questions", len(batch_questions))
 
         accepted_questions.extend(batch_questions)
 
@@ -205,15 +194,6 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
         print(f"accepted_total: {len(accepted_questions)}")
         print(f"remaining_questions: {remaining_questions}")
         print(f"output_tokens: {output_tokens}")
-
-        if remaining_questions <= 0:
-            break
-
-        current_batch_size = estimate_next_batch_size(
-            output_tokens=output_tokens,
-            returned_questions=returned_questions,
-            remaining_questions=remaining_questions,
-        )
 
     final_quiz = {
         "quiz_title": final_quiz_title,
