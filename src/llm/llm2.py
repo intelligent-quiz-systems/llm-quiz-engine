@@ -31,7 +31,7 @@ OUTPUT_BATCH_STEP_DOWN = 2
 # Zostawione w kodzie, aby można je było łatwo ponownie włączyć w razie potrzeby.
 # Debug log toggles for verbose output sections.
 # Temporarily disabled because they cluttered terminal output during normal testing.
-# Kept in code for quick re-enabling if deeper diagnostics are needed later.
+# Kept in code for quick re-enabling if needed later.
 SHOW_RESULT_QUIZ_JSON = False
 SHOW_VALIDATED_QUIZ_JSON = False
 
@@ -97,6 +97,14 @@ def classify_reject_reason(error_message: str) -> str:
     if "rate limit" in message or "error code: 429" in message or "429" in message:
         return "rate_limit"
     return "llm_error"
+
+
+def classify_reject_family(reject_reason: str) -> str:
+    if reject_reason in QUALITY_REJECT_REASONS:
+        return "quality"
+    if reject_reason in OUTPUT_REJECT_REASONS:
+        return "output"
+    return "other"
 
 
 def get_attempt_label(
@@ -181,6 +189,32 @@ def lock_safe_batch_size(
         return new_locked_batch_size
 
     return current_locked_batch_size
+
+
+def print_generation_batching_summary(
+    topic: str,
+    difficulty: str,
+    requested_questions: int,
+    generated_questions: int,
+    locked_batch_size: int,
+    stats: dict,
+    completed: bool,
+) -> None:
+    print("\n===== BATCHING GENERATION SUMMARY =====")
+    print(f"topic: {topic}")
+    print(f"difficulty: {difficulty}")
+    print(f"requested_questions: {requested_questions}")
+    print(f"generated_questions: {generated_questions}")
+    print(f"completed: {completed}")
+    print(f"final_locked_batch_size: {locked_batch_size}")
+    print(f"total_batches: {stats['total_batches']}")
+    print(f"rejected_batches: {stats['rejected_batches']}")
+    print(f"retry_count: {stats['retry_count']}")
+    print(f"fallback_10_to_5_count: {stats['fallback_10_to_5_count']}")
+    print(f"fallback_5_to_3_count: {stats['fallback_5_to_3_count']}")
+    print(f"quality_reject_count: {stats['quality_reject_count']}")
+    print(f"output_reject_count: {stats['output_reject_count']}")
+    print(f"other_reject_count: {stats['other_reject_count']}")
 
 
 def generate_quiz_batch(topic: str, difficulty: str, num_questions: int) -> dict:
@@ -296,6 +330,17 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
     batch_number = 1
     locked_batch_size = INITIAL_BATCH_SIZE
 
+    stats = {
+        "total_batches": 0,
+        "rejected_batches": 0,
+        "retry_count": 0,
+        "fallback_10_to_5_count": 0,
+        "fallback_5_to_3_count": 0,
+        "quality_reject_count": 0,
+        "output_reject_count": 0,
+        "other_reject_count": 0,
+    }
+
     while len(accepted_questions) < num_questions:
         remaining_questions = num_questions - len(accepted_questions)
         accepted_batch = None
@@ -334,6 +379,15 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
 
             reject_reason = batch_result["reject_reason"]
             error_details = batch_result["error_details"]
+            reject_family = classify_reject_family(reject_reason)
+
+            stats["rejected_batches"] += 1
+            if reject_family == "quality":
+                stats["quality_reject_count"] += 1
+            elif reject_family == "output":
+                stats["output_reject_count"] += 1
+            else:
+                stats["other_reject_count"] += 1
 
             print("\n===== BATCH REJECTED =====")
             print(f"batch_number: {batch_number}")
@@ -344,11 +398,12 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
             if error_details:
                 print(f"error_details: {error_details}")
 
-            # 1) Najpierw retry tego samego rozmiaru dla błędów jakości.
             if (
                 reject_reason in QUALITY_REJECT_REASONS
                 and retry_number_for_this_size < MAX_RETRIES_PER_BATCH_SIZE
             ):
+                stats["retry_count"] += 1
+
                 print("\n===== BATCH RETRY SAME SIZE =====")
                 print(f"batch_number: {batch_number}")
                 print(f"retry_reason: {reject_reason}")
@@ -357,10 +412,6 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
                 attempt_number += 1
                 continue
 
-            # 2) Dla problemów outputowych:
-            #    - 10 -> 5
-            #    - 5 -> 3
-            #    - 3 -> 1, jeśli nadal trzeba ratować sytuację.
             if reject_reason in OUTPUT_REJECT_REASONS:
                 if (
                     attempted_batch_size == primary_batch_size
@@ -372,6 +423,9 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
                     print(f"fallback_reason: {reject_reason}")
                     print(f"fallback_from: {attempted_batch_size}")
                     print(f"fallback_to: {fallback_batch_size}")
+
+                    if attempted_batch_size == 10 and fallback_batch_size == 5:
+                        stats["fallback_10_to_5_count"] += 1
 
                     locked_batch_size = lock_safe_batch_size(
                         current_locked_batch_size=locked_batch_size,
@@ -398,6 +452,9 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
                     print(f"fallback_from: {attempted_batch_size}")
                     print(f"fallback_to: {next_safe_batch_size}")
 
+                    if attempted_batch_size == 5 and next_safe_batch_size == 3:
+                        stats["fallback_5_to_3_count"] += 1
+
                     locked_batch_size = lock_safe_batch_size(
                         current_locked_batch_size=locked_batch_size,
                         new_locked_batch_size=next_safe_batch_size,
@@ -408,7 +465,6 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
                     attempt_number += 1
                     continue
 
-            # 3) Po wyczerpaniu retry / fallbacków schodzimy awaryjnie o 1.
             next_batch_size = reduce_batch_size(
                 attempted_batch_size,
                 remaining_questions,
@@ -428,6 +484,16 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
             print("\n===== BATCH FAILED =====")
             print(f"batch_number: {batch_number}")
             print("LLM error: could not generate a valid batch.")
+
+            print_generation_batching_summary(
+                topic=topic,
+                difficulty=difficulty,
+                requested_questions=num_questions,
+                generated_questions=len(accepted_questions),
+                locked_batch_size=locked_batch_size,
+                stats=stats,
+                completed=False,
+            )
             return None
 
         batch_quiz = accepted_batch["quiz"]
@@ -436,6 +502,7 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
         returned_questions = accepted_batch.get("returned_questions", len(batch_questions))
 
         accepted_questions.extend(batch_questions)
+        stats["total_batches"] += 1
 
         if batch_quiz.get("quiz_title"):
             final_quiz_title = batch_quiz["quiz_title"]
@@ -460,10 +527,30 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
 
     try:
         Quiz.model_validate(final_quiz)
+
+        print_generation_batching_summary(
+            topic=topic,
+            difficulty=difficulty,
+            requested_questions=num_questions,
+            generated_questions=len(final_quiz["questions"]),
+            locked_batch_size=locked_batch_size,
+            stats=stats,
+            completed=True,
+        )
         return final_quiz
 
     except ValidationError as e:
         print("Final quiz validation error:", e)
+
+        print_generation_batching_summary(
+            topic=topic,
+            difficulty=difficulty,
+            requested_questions=num_questions,
+            generated_questions=len(accepted_questions),
+            locked_batch_size=locked_batch_size,
+            stats=stats,
+            completed=False,
+        )
         return None
 
 
