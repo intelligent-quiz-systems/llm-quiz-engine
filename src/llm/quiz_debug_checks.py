@@ -6,32 +6,28 @@ TEXT_SIMILARITY_THRESHOLD = 0.88
 # Druga warstwa kontroli: podobieństwo merytoryczne / semantyczne.
 # Domyślnie włączona, ale działa bezpiecznie:
 # jeśli brakuje zależności, loguje pominięcie zamiast wywalać aplikację.
+# Second validation layer: semantic / meaning-based similarity.
+# Enabled by default, but designed to fail safely:
+# if dependencies are missing, it logs a skip instead of crashing the app.
 ENABLE_SEMANTIC_SIMILARITY = True
 
 # "suspicious_only" = najpierw szybki filtr tekstowy, potem embeddingi tylko dla podejrzanych par
 # "all_pairs" = embeddingi dla wszystkich par pytań
+# "suspicious_only" = first use a fast text filter, then run embeddings only for suspicious pairs
+# "all_pairs" = run embeddings for all question pairs
 SEMANTIC_CHECK_MODE = "suspicious_only"
 
 # Próg tekstowy do wyłapania par "podejrzanych", które warto sprawdzić semantycznie
+# Text threshold used to flag "suspicious" pairs worth checking semantically
 SEMANTIC_TEXT_PRECHECK_THRESHOLD = 0.55
 
 # Próg podobieństwa semantycznego
+# Semantic similarity threshold
 SEMANTIC_SIMILARITY_THRESHOLD = 0.84
 
 # Model wielojęzyczny, sensowny dla pytań po polsku
+# Multilingual model suitable for Polish questions
 SEMANTIC_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-
-try:
-    from sentence_transformers import SentenceTransformer
-    from sklearn.metrics.pairwise import cosine_similarity
-
-    SEMANTIC_TOOLS_AVAILABLE = True
-    SEMANTIC_IMPORT_ERROR = None
-except Exception as e:
-    SentenceTransformer = None
-    cosine_similarity = None
-    SEMANTIC_TOOLS_AVAILABLE = False
-    SEMANTIC_IMPORT_ERROR = str(e)
 
 
 def _normalize_text(text: str) -> str:
@@ -58,10 +54,33 @@ def _iter_question_pairs(normalized_questions: list[str]):
 
 
 @lru_cache(maxsize=1)
-def _get_semantic_model():
-    if not SEMANTIC_TOOLS_AVAILABLE:
-        raise RuntimeError(SEMANTIC_IMPORT_ERROR or "Semantic tools are not available")
+def _load_semantic_dependencies():
+    try:
+        from sentence_transformers import SentenceTransformer
+        from sklearn.metrics.pairwise import cosine_similarity
 
+        return {
+            "ok": True,
+            "SentenceTransformer": SentenceTransformer,
+            "cosine_similarity": cosine_similarity,
+            "error": None,
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "SentenceTransformer": None,
+            "cosine_similarity": None,
+            "error": str(e),
+        }
+
+
+@lru_cache(maxsize=1)
+def _get_semantic_model():
+    deps = _load_semantic_dependencies()
+    if not deps["ok"]:
+        raise RuntimeError(deps["error"] or "semantic tools are not available")
+
+    SentenceTransformer = deps["SentenceTransformer"]
     return SentenceTransformer(SEMANTIC_MODEL_NAME)
 
 
@@ -173,8 +192,9 @@ def find_semantically_similar_questions(
     if not ENABLE_SEMANTIC_SIMILARITY:
         return [], "semantic similarity disabled"
 
-    if not SEMANTIC_TOOLS_AVAILABLE:
-        return [], f"semantic similarity skipped: missing dependency ({SEMANTIC_IMPORT_ERROR})"
+    deps = _load_semantic_dependencies()
+    if not deps["ok"]:
+        return [], f"semantic similarity skipped: missing dependency ({deps['error']})"
 
     normalized_questions = _extract_normalized_questions(quiz_json)
     candidate_pairs = _get_semantic_candidate_pairs(
@@ -197,7 +217,12 @@ def find_semantically_similar_questions(
             unique_texts[q2] = len(ordered_unique_texts)
             ordered_unique_texts.append(q2)
 
-    model = _get_semantic_model()
+    try:
+        model = _get_semantic_model()
+    except Exception as e:
+        return [], f"semantic similarity skipped: model load failed ({e})"
+
+    cosine_similarity = deps["cosine_similarity"]
     embeddings = model.encode(ordered_unique_texts)
 
     issues = []
