@@ -1,37 +1,47 @@
+import os
 from difflib import SequenceMatcher
 from functools import lru_cache
 
 TEXT_SIMILARITY_THRESHOLD = 0.88
 
+
+def _env_flag(name: str, default: str = "0") -> bool:
+    value = os.getenv(name, default)
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 # Druga warstwa kontroli: podobieństwo merytoryczne / semantyczne.
-# Domyślnie włączona, ale działa bezpiecznie:
-# jeśli brakuje zależności, loguje pominięcie zamiast wywalać aplikację.
+# Domyślnie WYŁĄCZONA, żeby nie ładować ciężkich zależności podczas normalnej pracy
+# i nie zaśmiecać logów Streamlit/watchera.
+# Włączaj świadomie tylko do testów:
+# ENABLE_SEMANTIC_SIMILARITY=1
+#
 # Second validation layer: semantic / meaning-based similarity.
-# Enabled by default, but designed to fail safely:
-# if dependencies are missing, it logs a skip instead of crashing the app.
-ENABLE_SEMANTIC_SIMILARITY = True
+# Disabled by default to avoid loading heavy dependencies during normal runs
+# and to keep Streamlit/watcher logs clean.
+# Enable intentionally only for tests:
+# ENABLE_SEMANTIC_SIMILARITY=1
+ENABLE_SEMANTIC_SIMILARITY = _env_flag("ENABLE_SEMANTIC_SIMILARITY", "0")
 
 # "suspicious_only" = najpierw szybki filtr tekstowy, potem embeddingi tylko dla podejrzanych par
 # "all_pairs" = embeddingi dla wszystkich par pytań
-# "suspicious_only" = first use a fast text filter, then run embeddings only for suspicious pairs
-# "all_pairs" = run embeddings for all question pairs
-SEMANTIC_CHECK_MODE = "suspicious_only"
+SEMANTIC_CHECK_MODE = os.getenv("SEMANTIC_CHECK_MODE", "suspicious_only").strip().lower()
 
 # Próg tekstowy do wyłapania par "podejrzanych", które warto sprawdzić semantycznie
-# Text threshold used to flag "suspicious" pairs worth checking semantically
 SEMANTIC_TEXT_PRECHECK_THRESHOLD = 0.55
 
 # Próg podobieństwa semantycznego
-# Semantic similarity threshold
 SEMANTIC_SIMILARITY_THRESHOLD = 0.84
 
 # Model wielojęzyczny, sensowny dla pytań po polsku
-# Multilingual model suitable for Polish questions
-SEMANTIC_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+SEMANTIC_MODEL_NAME = os.getenv(
+    "SEMANTIC_MODEL_NAME",
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+)
 
 
 def _normalize_text(text: str) -> str:
-    return " ".join(text.strip().lower().split())
+    return " ".join(str(text).strip().lower().split())
 
 
 def _extract_normalized_questions(quiz_json: dict) -> list[str]:
@@ -55,6 +65,14 @@ def _iter_question_pairs(normalized_questions: list[str]):
 
 @lru_cache(maxsize=1)
 def _load_semantic_dependencies():
+    if not ENABLE_SEMANTIC_SIMILARITY:
+        return {
+            "ok": False,
+            "SentenceTransformer": None,
+            "cosine_similarity": None,
+            "error": "disabled by config",
+        }
+
     try:
         from sentence_transformers import SentenceTransformer
         from sklearn.metrics.pairwise import cosine_similarity
@@ -92,7 +110,7 @@ def check_question_structure(quiz_json: dict) -> list[str]:
         return ["questions is not a list"]
 
     for i, q in enumerate(questions):
-        prefix = f"Q{i+1}"
+        prefix = f"Q{i + 1}"
 
         if not isinstance(q, dict):
             issues.append(f"{prefix}: question item is not a dict")
@@ -190,11 +208,11 @@ def find_semantically_similar_questions(
     mode: str = SEMANTIC_CHECK_MODE,
 ) -> tuple[list[str], str | None]:
     if not ENABLE_SEMANTIC_SIMILARITY:
-        return [], "semantic similarity disabled"
+        return [], "semantic similarity disabled by config"
 
     deps = _load_semantic_dependencies()
     if not deps["ok"]:
-        return [], f"semantic similarity skipped: missing dependency ({deps['error']})"
+        return [], f"semantic similarity skipped: dependency/model problem ({deps['error']})"
 
     normalized_questions = _extract_normalized_questions(quiz_json)
     candidate_pairs = _get_semantic_candidate_pairs(
@@ -223,14 +241,22 @@ def find_semantically_similar_questions(
         return [], f"semantic similarity skipped: model load failed ({e})"
 
     cosine_similarity = deps["cosine_similarity"]
-    embeddings = model.encode(ordered_unique_texts)
+
+    try:
+        embeddings = model.encode(ordered_unique_texts, show_progress_bar=False)
+    except Exception as e:
+        return [], f"semantic similarity skipped: encode failed ({e})"
 
     issues = []
     for i, j, q1, q2 in candidate_pairs:
         idx1 = unique_texts[q1]
         idx2 = unique_texts[q2]
 
-        score = cosine_similarity([embeddings[idx1]], [embeddings[idx2]])[0][0]
+        try:
+            score = cosine_similarity([embeddings[idx1]], [embeddings[idx2]])[0][0]
+        except Exception as e:
+            return [], f"semantic similarity skipped: similarity calc failed ({e})"
+
         if score >= threshold:
             issues.append(
                 f"Semantically similar questions: Q{i + 1} and Q{j + 1} (score={score:.2f})"

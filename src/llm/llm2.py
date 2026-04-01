@@ -1,5 +1,7 @@
 import json
+import re
 import sys
+import time
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -23,8 +25,12 @@ INITIAL_BATCH_SIZE = 10
 FALLBACK_BATCH_SIZE = 5
 MIN_SAFE_BATCH_SIZE = 3
 MAX_RETRIES_PER_BATCH_SIZE = 2
+MAX_RATE_LIMIT_RETRIES_PER_BATCH_SIZE = 2
 SIMILAR_QUESTION_THRESHOLD = 0.88
 OUTPUT_BATCH_STEP_DOWN = 2
+DEFAULT_RATE_LIMIT_WAIT_SECONDS = 3.0
+MIN_RATE_LIMIT_WAIT_SECONDS = 0.5
+MAX_RATE_LIMIT_WAIT_SECONDS = 8.0
 
 # Przełączniki debugowe dla szczegółowych sekcji logów.
 # Tymczasowo wyłączone, ponieważ zaśmiecały terminal podczas bieżących testów.
@@ -191,6 +197,30 @@ def lock_safe_batch_size(
     return current_locked_batch_size
 
 
+def extract_rate_limit_wait_seconds(error_details: str | None) -> float:
+    # PL: Provider często zwraca wskazówkę typu "Please try again in 2.8575s".
+    # EN: The provider often returns a hint like "Please try again in 2.8575s".
+    if not error_details:
+        return DEFAULT_RATE_LIMIT_WAIT_SECONDS
+
+    match = re.search(
+        r"try again in\s*([0-9]+(?:\.[0-9]+)?)s",
+        error_details,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return DEFAULT_RATE_LIMIT_WAIT_SECONDS
+
+    try:
+        wait_seconds = float(match.group(1))
+    except ValueError:
+        return DEFAULT_RATE_LIMIT_WAIT_SECONDS
+
+    wait_seconds = max(wait_seconds, MIN_RATE_LIMIT_WAIT_SECONDS)
+    wait_seconds = min(wait_seconds, MAX_RATE_LIMIT_WAIT_SECONDS)
+    return wait_seconds
+
+
 def print_generation_batching_summary(
     topic: str,
     difficulty: str,
@@ -210,6 +240,8 @@ def print_generation_batching_summary(
     print(f"total_batches: {stats['total_batches']}")
     print(f"rejected_batches: {stats['rejected_batches']}")
     print(f"retry_count: {stats['retry_count']}")
+    print(f"rate_limit_retry_count: {stats['rate_limit_retry_count']}")
+    print(f"rate_limit_reject_count: {stats['rate_limit_reject_count']}")
     print(f"fallback_10_to_5_count: {stats['fallback_10_to_5_count']}")
     print(f"fallback_5_to_3_count: {stats['fallback_5_to_3_count']}")
     print(f"quality_reject_count: {stats['quality_reject_count']}")
@@ -334,6 +366,8 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
         "total_batches": 0,
         "rejected_batches": 0,
         "retry_count": 0,
+        "rate_limit_retry_count": 0,
+        "rate_limit_reject_count": 0,
         "fallback_10_to_5_count": 0,
         "fallback_5_to_3_count": 0,
         "quality_reject_count": 0,
@@ -382,6 +416,9 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
             reject_family = classify_reject_family(reject_reason)
 
             stats["rejected_batches"] += 1
+            if reject_reason == "rate_limit":
+                stats["rate_limit_reject_count"] += 1
+
             if reject_family == "quality":
                 stats["quality_reject_count"] += 1
             elif reject_family == "output":
@@ -398,6 +435,8 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
             if error_details:
                 print(f"error_details: {error_details}")
 
+            # PL: Błędy jakości próbujemy raz jeszcze w tym samym rozmiarze.
+            # EN: Quality errors are retried once more at the same batch size.
             if (
                 reject_reason in QUALITY_REJECT_REASONS
                 and retry_number_for_this_size < MAX_RETRIES_PER_BATCH_SIZE
@@ -412,6 +451,29 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
                 attempt_number += 1
                 continue
 
+            # PL: Rate limit 429 zwykle nie oznacza złego batcha.
+            # EN: A 429 rate limit usually does not mean the batch itself is bad.
+            # PL: Najpierw czekamy chwilę i próbujemy jeszcze raz tym samym rozmiarem.
+            # EN: First we wait briefly and retry with the same batch size.
+            if (
+                reject_reason == "rate_limit"
+                and retry_number_for_this_size < MAX_RATE_LIMIT_RETRIES_PER_BATCH_SIZE
+            ):
+                wait_seconds = extract_rate_limit_wait_seconds(error_details)
+                stats["rate_limit_retry_count"] += 1
+
+                print("\n===== RATE LIMIT WAIT =====")
+                print(f"batch_number: {batch_number}")
+                print(f"wait_seconds: {wait_seconds:.2f}")
+                print(f"retry_same_batch_size_after_wait: {attempted_batch_size}")
+
+                time.sleep(wait_seconds)
+
+                attempt_number += 1
+                continue
+
+            # PL: Błędy outputowe sterują głównym fallbackiem 10 -> 5 -> 3.
+            # EN: Output errors drive the main fallback path 10 -> 5 -> 3.
             if reject_reason in OUTPUT_REJECT_REASONS:
                 if (
                     attempted_batch_size == primary_batch_size
