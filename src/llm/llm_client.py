@@ -10,6 +10,15 @@ LLM_MODEL = "openai/gpt-oss-120b"
 LLM_TEMPERATURE = 0.7
 DEBUG_LLM = True
 
+# Przełączniki części logów.
+# Tymczasowo wyłączone, bo zaśmiecały terminal.
+# Zostawiamy w kodzie, gdyby później znów były potrzebne.
+
+# Debug log toggles for verbose output sections.
+# Temporarily disabled because they cluttered terminal output during normal testing.
+# Kept in code for quick re-enabling if deeper diagnostics are needed later.
+SHOW_RAW_LLM_RESPONSE = False
+
 load_dotenv()
 
 api_key = os.getenv("GROQ_API_KEY")
@@ -121,8 +130,9 @@ def run_prompt(
             )
             print("returned_questions: N/A (parsed_obj is None)")
 
-        print("\n===== RAW LLM RESPONSE =====")
-        print(response)
+        if SHOW_RAW_LLM_RESPONSE:
+            print("\n===== RAW LLM RESPONSE =====")
+            print(response)
 
     if parsed_obj is None:
         raise ValueError("LLM returned no parsed output")
