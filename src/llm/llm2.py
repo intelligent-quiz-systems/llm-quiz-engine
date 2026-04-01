@@ -11,11 +11,20 @@ if str(SRC_DIR) not in sys.path:
 
 from llm.llm_client import run_prompt
 from llm.quiz_model import Quiz
+from llm.quiz_debug_checks import (
+    check_question_structure,
+    find_duplicate_questions,
+    find_similar_questions,
+)
 
 HARD_MAX_OUTPUT_TOKENS = 2200
 DEFAULT_BATCH_QUESTION_LIMIT = 100
 INITIAL_BATCH_SIZE = 10
 FALLBACK_BATCH_SIZE = 5
+MIN_SAFE_BATCH_SIZE = 3
+MAX_RETRIES_PER_BATCH_SIZE = 2
+SIMILAR_QUESTION_THRESHOLD = 0.88
+OUTPUT_BATCH_STEP_DOWN = 2
 
 # Przełączniki debugowe dla szczegółowych sekcji logów.
 # Tymczasowo wyłączone, ponieważ zaśmiecały terminal podczas bieżących testów.
@@ -25,6 +34,18 @@ FALLBACK_BATCH_SIZE = 5
 # Kept in code for quick re-enabling if deeper diagnostics are needed later.
 SHOW_RESULT_QUIZ_JSON = False
 SHOW_VALIDATED_QUIZ_JSON = False
+
+QUALITY_REJECT_REASONS = {
+    "structure_issues",
+    "duplicate_questions",
+    "similar_questions",
+}
+
+OUTPUT_REJECT_REASONS = {
+    "json_validate_failed",
+    "incomplete_max_output_tokens",
+    "incomplete_response",
+}
 
 
 def normalize_batch_size(batch_size: int, remaining_questions: int) -> int:
@@ -48,6 +69,20 @@ def compact_error_details(message: str, max_length: int = 260) -> str:
     if len(cleaned) <= max_length:
         return cleaned
     return cleaned[:max_length] + "..."
+
+
+def compact_issue_list(
+    issues: list[str],
+    max_items: int = 3,
+    max_length: int = 260,
+) -> str:
+    preview = issues[:max_items]
+    summary = " | ".join(preview)
+
+    if len(issues) > max_items:
+        summary += f" | ... (+{len(issues) - max_items} more)"
+
+    return compact_error_details(summary, max_length=max_length)
 
 
 def classify_reject_reason(error_message: str) -> str:
@@ -103,6 +138,49 @@ def accept_batch(
         "output_tokens": output_tokens,
         "returned_questions": returned_questions,
     }
+
+
+def evaluate_batch_quality(quiz_json: dict) -> dict | None:
+    structure_issues = check_question_structure(quiz_json)
+    if structure_issues:
+        return reject_batch(
+            reject_reason="structure_issues",
+            error_details=compact_issue_list(structure_issues),
+        )
+
+    duplicate_questions = find_duplicate_questions(quiz_json)
+    if duplicate_questions:
+        return reject_batch(
+            reject_reason="duplicate_questions",
+            error_details=compact_issue_list(duplicate_questions),
+        )
+
+    similar_questions = find_similar_questions(
+        quiz_json,
+        threshold=SIMILAR_QUESTION_THRESHOLD,
+    )
+    if similar_questions:
+        return reject_batch(
+            reject_reason="similar_questions",
+            error_details=compact_issue_list(similar_questions),
+        )
+
+    return None
+
+
+def lock_safe_batch_size(
+    current_locked_batch_size: int,
+    new_locked_batch_size: int,
+    batch_number: int,
+) -> int:
+    if new_locked_batch_size < current_locked_batch_size:
+        print("\n===== SAFE BATCH MODE LOCKED =====")
+        print(f"batch_number: {batch_number}")
+        print(f"locked_batch_size: {new_locked_batch_size}")
+        print("note: all next batches in this generation will stay at this size or less")
+        return new_locked_batch_size
+
+    return current_locked_batch_size
 
 
 def generate_quiz_batch(topic: str, difficulty: str, num_questions: int) -> dict:
@@ -181,6 +259,10 @@ def generate_quiz_batch(topic: str, difficulty: str, num_questions: int) -> dict
                 ),
             )
 
+        quality_result = evaluate_batch_quality(quiz_json)
+        if quality_result is not None:
+            return quality_result
+
         return accept_batch(
             quiz_json=quiz_json,
             output_tokens=output_tokens,
@@ -223,8 +305,12 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
 
         attempted_batch_size = primary_batch_size
         attempt_number = 1
+        retries_for_size: dict[int, int] = {}
 
         while attempted_batch_size > 0:
+            retries_for_size[attempted_batch_size] = retries_for_size.get(attempted_batch_size, 0) + 1
+            retry_number_for_this_size = retries_for_size[attempted_batch_size]
+
             attempt_label = get_attempt_label(
                 attempted_batch_size=attempted_batch_size,
                 primary_batch_size=primary_batch_size,
@@ -235,6 +321,7 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
             print(f"batch_number: {batch_number}")
             print(f"attempt_number: {attempt_number}")
             print(f"attempt_label: {attempt_label}")
+            print(f"retry_number_for_this_size: {retry_number_for_this_size}")
             print(f"remaining_questions: {remaining_questions}")
             print(f"trying_batch_size: {attempted_batch_size}")
             print(f"locked_batch_size: {locked_batch_size}")
@@ -257,41 +344,84 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
             if error_details:
                 print(f"error_details: {error_details}")
 
+            # 1) Najpierw retry tego samego rozmiaru dla błędów jakości.
             if (
-                attempted_batch_size == primary_batch_size
-                and primary_batch_size > fallback_batch_size
-                and fallback_batch_size > 0
+                reject_reason in QUALITY_REJECT_REASONS
+                and retry_number_for_this_size < MAX_RETRIES_PER_BATCH_SIZE
             ):
-                print("\n===== BATCH FALLBACK =====")
+                print("\n===== BATCH RETRY SAME SIZE =====")
                 print(f"batch_number: {batch_number}")
-                print(f"fallback_reason: {reject_reason}")
-                print(f"fallback_from: {attempted_batch_size}")
-                print(f"fallback_to: {fallback_batch_size}")
+                print(f"retry_reason: {reject_reason}")
+                print(f"retry_same_batch_size: {attempted_batch_size}")
 
-                if locked_batch_size > FALLBACK_BATCH_SIZE:
-                    locked_batch_size = FALLBACK_BATCH_SIZE
+                attempt_number += 1
+                continue
 
-                    print("\n===== SAFE BATCH MODE LOCKED =====")
+            # 2) Dla problemów outputowych:
+            #    - 10 -> 5
+            #    - 5 -> 3
+            #    - 3 -> 1, jeśli nadal trzeba ratować sytuację.
+            if reject_reason in OUTPUT_REJECT_REASONS:
+                if (
+                    attempted_batch_size == primary_batch_size
+                    and primary_batch_size > fallback_batch_size
+                    and fallback_batch_size > 0
+                ):
+                    print("\n===== BATCH FALLBACK =====")
                     print(f"batch_number: {batch_number}")
-                    print(f"locked_batch_size: {locked_batch_size}")
-                    print("note: all next batches in this generation will stay at 5 or less")
+                    print(f"fallback_reason: {reject_reason}")
+                    print(f"fallback_from: {attempted_batch_size}")
+                    print(f"fallback_to: {fallback_batch_size}")
 
-                attempted_batch_size = fallback_batch_size
-            else:
-                next_batch_size = reduce_batch_size(
-                    attempted_batch_size,
-                    remaining_questions,
-                )
+                    locked_batch_size = lock_safe_batch_size(
+                        current_locked_batch_size=locked_batch_size,
+                        new_locked_batch_size=fallback_batch_size,
+                        batch_number=batch_number,
+                    )
 
-                if next_batch_size > 0:
-                    print("\n===== BATCH REDUCE =====")
+                    attempted_batch_size = fallback_batch_size
+                    attempt_number += 1
+                    continue
+
+                if attempted_batch_size <= FALLBACK_BATCH_SIZE and attempted_batch_size > MIN_SAFE_BATCH_SIZE:
+                    next_safe_batch_size = normalize_batch_size(
+                        attempted_batch_size - OUTPUT_BATCH_STEP_DOWN,
+                        remaining_questions,
+                    )
+
+                    if next_safe_batch_size < 1:
+                        next_safe_batch_size = 1
+
+                    print("\n===== BATCH OUTPUT FALLBACK =====")
                     print(f"batch_number: {batch_number}")
-                    print(f"reduce_reason: {reject_reason}")
-                    print(f"reduce_from: {attempted_batch_size}")
-                    print(f"reduce_to: {next_batch_size}")
+                    print(f"fallback_reason: {reject_reason}")
+                    print(f"fallback_from: {attempted_batch_size}")
+                    print(f"fallback_to: {next_safe_batch_size}")
 
-                attempted_batch_size = next_batch_size
+                    locked_batch_size = lock_safe_batch_size(
+                        current_locked_batch_size=locked_batch_size,
+                        new_locked_batch_size=next_safe_batch_size,
+                        batch_number=batch_number,
+                    )
 
+                    attempted_batch_size = next_safe_batch_size
+                    attempt_number += 1
+                    continue
+
+            # 3) Po wyczerpaniu retry / fallbacków schodzimy awaryjnie o 1.
+            next_batch_size = reduce_batch_size(
+                attempted_batch_size,
+                remaining_questions,
+            )
+
+            if next_batch_size > 0:
+                print("\n===== BATCH REDUCE =====")
+                print(f"batch_number: {batch_number}")
+                print(f"reduce_reason: {reject_reason}")
+                print(f"reduce_from: {attempted_batch_size}")
+                print(f"reduce_to: {next_batch_size}")
+
+            attempted_batch_size = next_batch_size
             attempt_number += 1
 
         if accepted_batch is None:
