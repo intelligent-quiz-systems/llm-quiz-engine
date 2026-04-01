@@ -1,8 +1,68 @@
 from difflib import SequenceMatcher
+from functools import lru_cache
+
+TEXT_SIMILARITY_THRESHOLD = 0.88
+
+# Druga warstwa kontroli: podobieństwo merytoryczne / semantyczne.
+# Domyślnie włączona, ale działa bezpiecznie:
+# jeśli brakuje zależności, loguje pominięcie zamiast wywalać aplikację.
+ENABLE_SEMANTIC_SIMILARITY = True
+
+# "suspicious_only" = najpierw szybki filtr tekstowy, potem embeddingi tylko dla podejrzanych par
+# "all_pairs" = embeddingi dla wszystkich par pytań
+SEMANTIC_CHECK_MODE = "suspicious_only"
+
+# Próg tekstowy do wyłapania par "podejrzanych", które warto sprawdzić semantycznie
+SEMANTIC_TEXT_PRECHECK_THRESHOLD = 0.55
+
+# Próg podobieństwa semantycznego
+SEMANTIC_SIMILARITY_THRESHOLD = 0.84
+
+# Model wielojęzyczny, sensowny dla pytań po polsku
+SEMANTIC_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+try:
+    from sentence_transformers import SentenceTransformer
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    SEMANTIC_TOOLS_AVAILABLE = True
+    SEMANTIC_IMPORT_ERROR = None
+except Exception as e:
+    SentenceTransformer = None
+    cosine_similarity = None
+    SEMANTIC_TOOLS_AVAILABLE = False
+    SEMANTIC_IMPORT_ERROR = str(e)
 
 
 def _normalize_text(text: str) -> str:
     return " ".join(text.strip().lower().split())
+
+
+def _extract_normalized_questions(quiz_json: dict) -> list[str]:
+    questions = quiz_json.get("questions", [])
+    return [_normalize_text(q.get("question", "")) for q in questions]
+
+
+def _iter_question_pairs(normalized_questions: list[str]):
+    for i in range(len(normalized_questions)):
+        q1 = normalized_questions[i]
+        if not q1:
+            continue
+
+        for j in range(i + 1, len(normalized_questions)):
+            q2 = normalized_questions[j]
+            if not q2:
+                continue
+
+            yield i, j, q1, q2
+
+
+@lru_cache(maxsize=1)
+def _get_semantic_model():
+    if not SEMANTIC_TOOLS_AVAILABLE:
+        raise RuntimeError(SEMANTIC_IMPORT_ERROR or "Semantic tools are not available")
+
+    return SentenceTransformer(SEMANTIC_MODEL_NAME)
 
 
 def check_question_structure(quiz_json: dict) -> list[str]:
@@ -69,44 +129,127 @@ def find_duplicate_questions(quiz_json: dict) -> list[str]:
     return issues
 
 
-def find_similar_questions(quiz_json: dict, threshold: float = 0.88) -> list[str]:
+def find_similar_questions(
+    quiz_json: dict,
+    threshold: float = TEXT_SIMILARITY_THRESHOLD,
+) -> list[str]:
     issues = []
-    questions = quiz_json.get("questions", [])
+    normalized_questions = _extract_normalized_questions(quiz_json)
 
-    normalized_questions = [
-        _normalize_text(q.get("question", ""))
-        for q in questions
-    ]
-
-    for i in range(len(normalized_questions)):
-        q1 = normalized_questions[i]
-        if not q1:
-            continue
-
-        for j in range(i + 1, len(normalized_questions)):
-            q2 = normalized_questions[j]
-            if not q2:
-                continue
-
-            score = SequenceMatcher(None, q1, q2).ratio()
-            if score >= threshold:
-                issues.append(
-                    f"Very similar questions: Q{i + 1} and Q{j + 1} (score={score:.2f})"
-                )
+    for i, j, q1, q2 in _iter_question_pairs(normalized_questions):
+        score = SequenceMatcher(None, q1, q2).ratio()
+        if score >= threshold:
+            issues.append(
+                f"Very similar questions: Q{i + 1} and Q{j + 1} (score={score:.2f})"
+            )
 
     return issues
 
 
-def print_quiz_debug_checks(quiz_json: dict, requested_questions: int | None = None) -> None:
+def _get_semantic_candidate_pairs(
+    normalized_questions: list[str],
+    mode: str = SEMANTIC_CHECK_MODE,
+    text_precheck_threshold: float = SEMANTIC_TEXT_PRECHECK_THRESHOLD,
+) -> list[tuple[int, int, str, str]]:
+    pairs = []
+
+    for i, j, q1, q2 in _iter_question_pairs(normalized_questions):
+        if mode == "all_pairs":
+            pairs.append((i, j, q1, q2))
+            continue
+
+        text_score = SequenceMatcher(None, q1, q2).ratio()
+        if text_score >= text_precheck_threshold:
+            pairs.append((i, j, q1, q2))
+
+    return pairs
+
+
+def find_semantically_similar_questions(
+    quiz_json: dict,
+    threshold: float = SEMANTIC_SIMILARITY_THRESHOLD,
+    mode: str = SEMANTIC_CHECK_MODE,
+) -> tuple[list[str], str | None]:
+    if not ENABLE_SEMANTIC_SIMILARITY:
+        return [], "semantic similarity disabled"
+
+    if not SEMANTIC_TOOLS_AVAILABLE:
+        return [], f"semantic similarity skipped: missing dependency ({SEMANTIC_IMPORT_ERROR})"
+
+    normalized_questions = _extract_normalized_questions(quiz_json)
+    candidate_pairs = _get_semantic_candidate_pairs(
+        normalized_questions,
+        mode=mode,
+        text_precheck_threshold=SEMANTIC_TEXT_PRECHECK_THRESHOLD,
+    )
+
+    if not candidate_pairs:
+        return [], None
+
+    unique_texts = {}
+    ordered_unique_texts = []
+
+    for _, _, q1, q2 in candidate_pairs:
+        if q1 not in unique_texts:
+            unique_texts[q1] = len(ordered_unique_texts)
+            ordered_unique_texts.append(q1)
+        if q2 not in unique_texts:
+            unique_texts[q2] = len(ordered_unique_texts)
+            ordered_unique_texts.append(q2)
+
+    model = _get_semantic_model()
+    embeddings = model.encode(ordered_unique_texts)
+
+    issues = []
+    for i, j, q1, q2 in candidate_pairs:
+        idx1 = unique_texts[q1]
+        idx2 = unique_texts[q2]
+
+        score = cosine_similarity([embeddings[idx1]], [embeddings[idx2]])[0][0]
+        if score >= threshold:
+            issues.append(
+                f"Semantically similar questions: Q{i + 1} and Q{j + 1} (score={score:.2f})"
+            )
+
+    return issues, None
+
+
+def collect_quiz_quality_issues(quiz_json: dict) -> dict:
     structure_issues = check_question_structure(quiz_json)
     duplicate_questions = find_duplicate_questions(quiz_json)
     similar_questions = find_similar_questions(quiz_json)
+    semantic_similar_questions, semantic_note = find_semantically_similar_questions(quiz_json)
+
+    return {
+        "structure_issues": structure_issues,
+        "duplicate_questions": duplicate_questions,
+        "similar_questions": similar_questions,
+        "semantic_similar_questions": semantic_similar_questions,
+        "semantic_note": semantic_note,
+    }
+
+
+def print_quiz_debug_checks(quiz_json: dict, requested_questions: int | None = None) -> None:
+    issues = collect_quiz_quality_issues(quiz_json)
+
+    structure_issues = issues["structure_issues"]
+    duplicate_questions = issues["duplicate_questions"]
+    similar_questions = issues["similar_questions"]
+    semantic_similar_questions = issues["semantic_similar_questions"]
+    semantic_note = issues["semantic_note"]
 
     print("\n===== QUIZ DEBUG CHECKS =====")
-    print(f"requested_questions: {requested_questions if requested_questions is not None else 'N/A'}")
+    print(
+        f"requested_questions: "
+        f"{requested_questions if requested_questions is not None else 'N/A'}"
+    )
     print(f"structure_issues_count: {len(structure_issues)}")
     print(f"duplicate_questions_count: {len(duplicate_questions)}")
     print(f"similar_questions_count: {len(similar_questions)}")
+    print(f"semantic_similar_questions_count: {len(semantic_similar_questions)}")
+
+    if semantic_note:
+        print(f"semantic_similarity_note: {semantic_note}")
 
     if structure_issues:
         print("\n--- STRUCTURE ISSUES ---")
@@ -121,4 +264,9 @@ def print_quiz_debug_checks(quiz_json: dict, requested_questions: int | None = N
     if similar_questions:
         print("\n--- VERY SIMILAR QUESTIONS ---")
         for issue in similar_questions:
+            print(issue)
+
+    if semantic_similar_questions:
+        print("\n--- SEMANTICALLY SIMILAR QUESTIONS ---")
+        for issue in semantic_similar_questions:
             print(issue)
