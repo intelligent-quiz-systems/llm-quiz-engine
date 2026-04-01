@@ -43,7 +43,69 @@ def reduce_batch_size(current_batch_size: int, remaining_questions: int) -> int:
     return normalize_batch_size(reduced, remaining_questions)
 
 
-def generate_quiz_batch(topic: str, difficulty: str, num_questions: int) -> dict | None:
+def compact_error_details(message: str, max_length: int = 260) -> str:
+    cleaned = " ".join(str(message).split())
+    if len(cleaned) <= max_length:
+        return cleaned
+    return cleaned[:max_length] + "..."
+
+
+def classify_reject_reason(error_message: str) -> str:
+    message = error_message.lower()
+
+    if "json_validate_failed" in message:
+        return "json_validate_failed"
+    if "max_output_tokens" in message and "incomplete" in message:
+        return "incomplete_max_output_tokens"
+    if "incomplete" in message:
+        return "incomplete_response"
+    if "rate limit" in message or "error code: 429" in message or "429" in message:
+        return "rate_limit"
+    return "llm_error"
+
+
+def get_attempt_label(
+    attempted_batch_size: int,
+    primary_batch_size: int,
+    fallback_batch_size: int,
+) -> str:
+    if attempted_batch_size == primary_batch_size:
+        return "PRIMARY"
+    if attempted_batch_size == fallback_batch_size and fallback_batch_size < primary_batch_size:
+        return "FALLBACK"
+    return "EMERGENCY"
+
+
+def reject_batch(
+    reject_reason: str,
+    error_details: str | None = None,
+) -> dict:
+    return {
+        "ok": False,
+        "reject_reason": reject_reason,
+        "error_details": error_details,
+        "quiz": None,
+        "output_tokens": None,
+        "returned_questions": 0,
+    }
+
+
+def accept_batch(
+    quiz_json: dict,
+    output_tokens: int | None,
+    returned_questions: int,
+) -> dict:
+    return {
+        "ok": True,
+        "reject_reason": None,
+        "error_details": None,
+        "quiz": quiz_json,
+        "output_tokens": output_tokens,
+        "returned_questions": returned_questions,
+    }
+
+
+def generate_quiz_batch(topic: str, difficulty: str, num_questions: int) -> dict:
     system_prompt = """
         You are a quiz generator.
 
@@ -111,25 +173,32 @@ def generate_quiz_batch(topic: str, difficulty: str, num_questions: int) -> dict
 
         returned_questions = len(quiz_json.get("questions", []))
         if returned_questions != num_questions:
-            print(
-                f"Batch rejected: requested_questions={num_questions}, "
-                f"returned_questions={returned_questions}"
+            return reject_batch(
+                reject_reason="wrong_question_count",
+                error_details=(
+                    f"requested_questions={num_questions}, "
+                    f"returned_questions={returned_questions}"
+                ),
             )
-            return None
 
-        return {
-            "quiz": quiz_json,
-            "output_tokens": output_tokens,
-            "returned_questions": returned_questions,
-        }
+        return accept_batch(
+            quiz_json=quiz_json,
+            output_tokens=output_tokens,
+            returned_questions=returned_questions,
+        )
 
     except ValidationError as e:
-        print("Validation error:", e)
-        return None
+        return reject_batch(
+            reject_reason="validation_error",
+            error_details=compact_error_details(str(e)),
+        )
 
     except Exception as e:
-        print("LLM error:", e)
-        return None
+        message = str(e)
+        return reject_batch(
+            reject_reason=classify_reject_reason(message),
+            error_details=compact_error_details(message),
+        )
 
 
 def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | None:
@@ -142,6 +211,7 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
 
     accepted_questions = []
     final_quiz_title = topic
+    batch_number = 1
 
     while len(accepted_questions) < num_questions:
         remaining_questions = num_questions - len(accepted_questions)
@@ -151,36 +221,78 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
         fallback_batch_size = normalize_batch_size(FALLBACK_BATCH_SIZE, remaining_questions)
 
         attempted_batch_size = primary_batch_size
+        attempt_number = 1
 
         while attempted_batch_size > 0:
+            attempt_label = get_attempt_label(
+                attempted_batch_size=attempted_batch_size,
+                primary_batch_size=primary_batch_size,
+                fallback_batch_size=fallback_batch_size,
+            )
+
             print("\n===== BATCH SEARCH =====")
+            print(f"batch_number: {batch_number}")
+            print(f"attempt_number: {attempt_number}")
+            print(f"attempt_label: {attempt_label}")
             print(f"remaining_questions: {remaining_questions}")
             print(f"trying_batch_size: {attempted_batch_size}")
 
             batch_result = generate_quiz_batch(topic, difficulty, attempted_batch_size)
 
-            if batch_result is not None:
+            if batch_result["ok"]:
                 accepted_batch = batch_result
                 break
+
+            reject_reason = batch_result["reject_reason"]
+            error_details = batch_result["error_details"]
+
+            print("\n===== BATCH REJECTED =====")
+            print(f"batch_number: {batch_number}")
+            print(f"attempt_number: {attempt_number}")
+            print(f"attempt_label: {attempt_label}")
+            print(f"requested_in_batch: {attempted_batch_size}")
+            print(f"reject_reason: {reject_reason}")
+            if error_details:
+                print(f"error_details: {error_details}")
 
             if (
                 attempted_batch_size == primary_batch_size
                 and fallback_batch_size < primary_batch_size
             ):
+                print("\n===== BATCH FALLBACK =====")
+                print(f"batch_number: {batch_number}")
+                print(f"fallback_reason: {reject_reason}")
+                print(f"fallback_from: {attempted_batch_size}")
+                print(f"fallback_to: {fallback_batch_size}")
+
                 attempted_batch_size = fallback_batch_size
             else:
-                attempted_batch_size = reduce_batch_size(
+                next_batch_size = reduce_batch_size(
                     attempted_batch_size,
                     remaining_questions,
                 )
 
+                if next_batch_size > 0:
+                    print("\n===== BATCH REDUCE =====")
+                    print(f"batch_number: {batch_number}")
+                    print(f"reduce_reason: {reject_reason}")
+                    print(f"reduce_from: {attempted_batch_size}")
+                    print(f"reduce_to: {next_batch_size}")
+
+                attempted_batch_size = next_batch_size
+
+            attempt_number += 1
+
         if accepted_batch is None:
+            print("\n===== BATCH FAILED =====")
+            print(f"batch_number: {batch_number}")
             print("LLM error: could not generate a valid batch.")
             return None
 
         batch_quiz = accepted_batch["quiz"]
         batch_questions = batch_quiz.get("questions", [])
         output_tokens = accepted_batch.get("output_tokens")
+        returned_questions = accepted_batch.get("returned_questions", len(batch_questions))
 
         accepted_questions.extend(batch_questions)
 
@@ -190,10 +302,14 @@ def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | N
         remaining_questions = num_questions - len(accepted_questions)
 
         print("\n===== BATCH ACCEPTED =====")
+        print(f"batch_number: {batch_number}")
         print(f"accepted_now: {len(batch_questions)}")
         print(f"accepted_total: {len(accepted_questions)}")
         print(f"remaining_questions: {remaining_questions}")
+        print(f"returned_questions: {returned_questions}")
         print(f"output_tokens: {output_tokens}")
+
+        batch_number += 1
 
     final_quiz = {
         "quiz_title": final_quiz_title,
