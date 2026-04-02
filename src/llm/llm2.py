@@ -31,6 +31,7 @@ OUTPUT_BATCH_STEP_DOWN = 2
 DEFAULT_RATE_LIMIT_WAIT_SECONDS = 3.0
 MIN_RATE_LIMIT_WAIT_SECONDS = 0.5
 MAX_RATE_LIMIT_WAIT_SECONDS = 8.0
+LONG_RATE_LIMIT_WAIT_THRESHOLD_SECONDS = 60.0
 
 # PL: Przełączniki debugowe dla szczegółowych sekcji logów.
 # EN: Debug toggles for verbose log sections.
@@ -106,6 +107,8 @@ def classify_reject_family(reject_reason: str) -> str:
         return "quality"
     if reject_reason in OUTPUT_REJECT_REASONS:
         return "output"
+    if reject_reason == "rate_limit":
+        return "rate_limit"
     return "other"
 
 
@@ -194,27 +197,90 @@ def lock_safe_batch_size(
 
 
 def extract_rate_limit_wait_seconds(error_details: str | None) -> float:
-    # PL: Provider często zwraca wskazówkę typu "Please try again in 2.8575s".
-    # EN: The provider often returns a hint like "Please try again in 2.8575s".
+    # PL: Provider może zwrócić wskazówkę w sekundach albo w formacie XmYs.
+    # PL: Ta funkcja wyciąga pełny czas oczekiwania, ale do krótkiego sleepa go ograniczamy.
+    # EN: The provider may return either seconds or an XmYs wait hint.
+    # EN: This function extracts the full wait time, but we clamp it for short sleeps.
     if not error_details:
         return DEFAULT_RATE_LIMIT_WAIT_SECONDS
 
-    match = re.search(
+    minutes_seconds_match = re.search(
+        r"try again in\s*([0-9]+)m([0-9]+(?:\.[0-9]+)?)s",
+        error_details,
+        flags=re.IGNORECASE,
+    )
+    if minutes_seconds_match:
+        try:
+            minutes = float(minutes_seconds_match.group(1))
+            seconds = float(minutes_seconds_match.group(2))
+            wait_seconds = (minutes * 60.0) + seconds
+            wait_seconds = max(wait_seconds, MIN_RATE_LIMIT_WAIT_SECONDS)
+            wait_seconds = min(wait_seconds, MAX_RATE_LIMIT_WAIT_SECONDS)
+            return wait_seconds
+        except ValueError:
+            return DEFAULT_RATE_LIMIT_WAIT_SECONDS
+
+    seconds_match = re.search(
         r"try again in\s*([0-9]+(?:\.[0-9]+)?)s",
         error_details,
         flags=re.IGNORECASE,
     )
-    if not match:
+    if not seconds_match:
         return DEFAULT_RATE_LIMIT_WAIT_SECONDS
 
     try:
-        wait_seconds = float(match.group(1))
+        wait_seconds = float(seconds_match.group(1))
     except ValueError:
         return DEFAULT_RATE_LIMIT_WAIT_SECONDS
 
     wait_seconds = max(wait_seconds, MIN_RATE_LIMIT_WAIT_SECONDS)
     wait_seconds = min(wait_seconds, MAX_RATE_LIMIT_WAIT_SECONDS)
     return wait_seconds
+
+
+def is_long_rate_limit_wait(error_details: str | None) -> bool:
+    # PL: Jeśli provider mówi o TPD albo każe czekać bardzo długo,
+    # PL: nie warto retryować w tej samej sesji w kółko.
+    # EN: If the provider reports TPD or a very long wait,
+    # EN: retrying in a loop in the same session is not worth it.
+    if not error_details:
+        return False
+
+    lowered = error_details.lower()
+
+    if "tokens per day" in lowered:
+        return True
+
+    if "tpd" in lowered:
+        return True
+
+    minutes_seconds_match = re.search(
+        r"try again in\s*([0-9]+)m([0-9]+(?:\.[0-9]+)?)s",
+        error_details,
+        flags=re.IGNORECASE,
+    )
+    if minutes_seconds_match:
+        try:
+            minutes = float(minutes_seconds_match.group(1))
+            seconds = float(minutes_seconds_match.group(2))
+            wait_seconds = (minutes * 60.0) + seconds
+            return wait_seconds >= LONG_RATE_LIMIT_WAIT_THRESHOLD_SECONDS
+        except ValueError:
+            return False
+
+    seconds_match = re.search(
+        r"try again in\s*([0-9]+(?:\.[0-9]+)?)s",
+        error_details,
+        flags=re.IGNORECASE,
+    )
+    if seconds_match:
+        try:
+            wait_seconds = float(seconds_match.group(1))
+            return wait_seconds >= LONG_RATE_LIMIT_WAIT_THRESHOLD_SECONDS
+        except ValueError:
+            return False
+
+    return False
 
 
 def build_empty_stats() -> dict:
@@ -251,10 +317,17 @@ def create_generation_state(num_questions: int) -> dict:
 
 
 def build_quiz_from_state(state: dict, fallback_title: str) -> dict:
+    requested_questions = state.get("requested_questions")
+    accepted_questions = state.get("accepted_questions", [])
+
+    if isinstance(requested_questions, int) and requested_questions >= 0:
+        accepted_questions = accepted_questions[:requested_questions]
+
     quiz_title = state.get("final_quiz_title") or fallback_title
+
     return {
         "quiz_title": quiz_title,
-        "questions": state.get("accepted_questions", []),
+        "questions": accepted_questions,
     }
 
 
@@ -466,6 +539,8 @@ def _generate_one_accepted_batch(
 
     remaining_questions = requested_questions - len(accepted_questions)
     accepted_batch = None
+    last_reject_reason = None
+    last_error_details = None
 
     primary_batch_size = normalize_batch_size(locked_batch_size, remaining_questions)
     fallback_batch_size = normalize_batch_size(FALLBACK_BATCH_SIZE, remaining_questions)
@@ -503,6 +578,9 @@ def _generate_one_accepted_batch(
         error_details = batch_result["error_details"]
         reject_family = classify_reject_family(reject_reason)
 
+        last_reject_reason = reject_reason
+        last_error_details = error_details
+
         stats["rejected_batches"] += 1
         if reject_reason == "rate_limit":
             stats["rate_limit_reject_count"] += 1
@@ -511,7 +589,7 @@ def _generate_one_accepted_batch(
             stats["quality_reject_count"] += 1
         elif reject_family == "output":
             stats["output_reject_count"] += 1
-        else:
+        elif reject_family == "other":
             stats["other_reject_count"] += 1
 
         print("\n===== BATCH REJECTED =====")
@@ -539,8 +617,21 @@ def _generate_one_accepted_batch(
             attempt_number += 1
             continue
 
-        # PL: Rate limit 429 zwykle nie oznacza złego batcha.
-        # EN: A 429 rate limit usually does not mean the batch itself is bad.
+        # PL: Długi rate limit albo TPD przerywa dalsze próby od razu.
+        # PL: Nie ma sensu robić wielu retry co kilka sekund.
+        # EN: A long rate limit or TPD stops further attempts immediately.
+        # EN: Repeating retries every few seconds is not useful in that case.
+        if reject_reason == "rate_limit" and is_long_rate_limit_wait(error_details):
+            print("\n===== RATE LIMIT HALT =====")
+            print(f"batch_number: {batch_number}")
+            if error_details:
+                print(f"error_details: {error_details}")
+            break
+
+        # PL: Krótki rate limit 429 zwykle nie oznacza złego batcha.
+        # PL: Najpierw czekamy chwilę i próbujemy jeszcze raz tym samym rozmiarem.
+        # EN: A short 429 rate limit usually does not mean the batch itself is bad.
+        # EN: First we wait briefly and retry with the same batch size.
         if (
             reject_reason == "rate_limit"
             and retry_number_for_this_size < MAX_RATE_LIMIT_RETRIES_PER_BATCH_SIZE
@@ -633,10 +724,15 @@ def _generate_one_accepted_batch(
     if accepted_batch is None:
         print("\n===== BATCH FAILED =====")
         print(f"batch_number: {batch_number}")
-        print("LLM error: could not generate a valid batch.")
+
+        if last_error_details:
+            print(f"error_details: {last_error_details}")
 
         state["failed"] = True
-        state["last_error"] = "LLM error: could not generate a valid batch."
+        state["last_error"] = (
+            last_error_details
+            or f"LLM error: could not generate a valid batch ({last_reject_reason or 'unknown'})."
+        )
 
         print_generation_batching_summary(
             topic=topic,
@@ -665,6 +761,9 @@ def _generate_one_accepted_batch(
     returned_questions = accepted_batch.get("returned_questions", len(batch_questions))
 
     accepted_questions.extend(batch_questions)
+    if len(accepted_questions) > requested_questions:
+        del accepted_questions[requested_questions:]
+
     stats["total_batches"] += 1
 
     if batch_quiz.get("quiz_title"):
