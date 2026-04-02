@@ -32,12 +32,8 @@ DEFAULT_RATE_LIMIT_WAIT_SECONDS = 3.0
 MIN_RATE_LIMIT_WAIT_SECONDS = 0.5
 MAX_RATE_LIMIT_WAIT_SECONDS = 8.0
 
-# Przełączniki debugowe dla szczegółowych sekcji logów.
-# Tymczasowo wyłączone, ponieważ zaśmiecały terminal podczas bieżących testów.
-# Zostawione w kodzie, aby można je było łatwo ponownie włączyć w razie potrzeby.
-# Debug log toggles for verbose output sections.
-# Temporarily disabled because they cluttered terminal output during normal testing.
-# Kept in code for quick re-enabling if needed later.
+# PL: Przełączniki debugowe dla szczegółowych sekcji logów.
+# EN: Debug toggles for verbose log sections.
 SHOW_RESULT_QUIZ_JSON = False
 SHOW_VALIDATED_QUIZ_JSON = False
 
@@ -221,6 +217,47 @@ def extract_rate_limit_wait_seconds(error_details: str | None) -> float:
     return wait_seconds
 
 
+def build_empty_stats() -> dict:
+    # PL: Statystyki całej generacji.
+    # EN: Generation-wide statistics.
+    return {
+        "total_batches": 0,
+        "rejected_batches": 0,
+        "retry_count": 0,
+        "rate_limit_retry_count": 0,
+        "rate_limit_reject_count": 0,
+        "fallback_10_to_5_count": 0,
+        "fallback_5_to_3_count": 0,
+        "quality_reject_count": 0,
+        "output_reject_count": 0,
+        "other_reject_count": 0,
+    }
+
+
+def create_generation_state(num_questions: int) -> dict:
+    # PL: Stan partial loading trzymany np. w session_state.
+    # EN: Partial loading state that can be stored in session_state.
+    return {
+        "requested_questions": num_questions,
+        "accepted_questions": [],
+        "final_quiz_title": None,
+        "batch_number": 1,
+        "locked_batch_size": INITIAL_BATCH_SIZE,
+        "stats": build_empty_stats(),
+        "completed": False,
+        "failed": False,
+        "last_error": None,
+    }
+
+
+def build_quiz_from_state(state: dict, fallback_title: str) -> dict:
+    quiz_title = state.get("final_quiz_title") or fallback_title
+    return {
+        "quiz_title": quiz_title,
+        "questions": state.get("accepted_questions", []),
+    }
+
+
 def print_generation_batching_summary(
     topic: str,
     difficulty: str,
@@ -349,271 +386,434 @@ def generate_quiz_batch(topic: str, difficulty: str, num_questions: int) -> dict
         )
 
 
-def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | None:
-    if num_questions < 1 or num_questions > DEFAULT_BATCH_QUESTION_LIMIT:
-        print(
-            f"Invalid question count: {num_questions}. "
-            f"Allowed range is 1-{DEFAULT_BATCH_QUESTION_LIMIT}."
-        )
-        return None
-
-    accepted_questions = []
-    final_quiz_title = topic
-    batch_number = 1
-    locked_batch_size = INITIAL_BATCH_SIZE
-
-    stats = {
-        "total_batches": 0,
-        "rejected_batches": 0,
-        "retry_count": 0,
-        "rate_limit_retry_count": 0,
-        "rate_limit_reject_count": 0,
-        "fallback_10_to_5_count": 0,
-        "fallback_5_to_3_count": 0,
-        "quality_reject_count": 0,
-        "output_reject_count": 0,
-        "other_reject_count": 0,
-    }
-
-    while len(accepted_questions) < num_questions:
-        remaining_questions = num_questions - len(accepted_questions)
-        accepted_batch = None
-
-        primary_batch_size = normalize_batch_size(locked_batch_size, remaining_questions)
-        fallback_batch_size = normalize_batch_size(FALLBACK_BATCH_SIZE, remaining_questions)
-
-        attempted_batch_size = primary_batch_size
-        attempt_number = 1
-        retries_for_size: dict[int, int] = {}
-
-        while attempted_batch_size > 0:
-            retries_for_size[attempted_batch_size] = retries_for_size.get(attempted_batch_size, 0) + 1
-            retry_number_for_this_size = retries_for_size[attempted_batch_size]
-
-            attempt_label = get_attempt_label(
-                attempted_batch_size=attempted_batch_size,
-                primary_batch_size=primary_batch_size,
-                fallback_batch_size=fallback_batch_size,
-            )
-
-            print("\n===== BATCH SEARCH =====")
-            print(f"batch_number: {batch_number}")
-            print(f"attempt_number: {attempt_number}")
-            print(f"attempt_label: {attempt_label}")
-            print(f"retry_number_for_this_size: {retry_number_for_this_size}")
-            print(f"remaining_questions: {remaining_questions}")
-            print(f"trying_batch_size: {attempted_batch_size}")
-            print(f"locked_batch_size: {locked_batch_size}")
-
-            batch_result = generate_quiz_batch(topic, difficulty, attempted_batch_size)
-
-            if batch_result["ok"]:
-                accepted_batch = batch_result
-                break
-
-            reject_reason = batch_result["reject_reason"]
-            error_details = batch_result["error_details"]
-            reject_family = classify_reject_family(reject_reason)
-
-            stats["rejected_batches"] += 1
-            if reject_reason == "rate_limit":
-                stats["rate_limit_reject_count"] += 1
-
-            if reject_family == "quality":
-                stats["quality_reject_count"] += 1
-            elif reject_family == "output":
-                stats["output_reject_count"] += 1
-            else:
-                stats["other_reject_count"] += 1
-
-            print("\n===== BATCH REJECTED =====")
-            print(f"batch_number: {batch_number}")
-            print(f"attempt_number: {attempt_number}")
-            print(f"attempt_label: {attempt_label}")
-            print(f"requested_in_batch: {attempted_batch_size}")
-            print(f"reject_reason: {reject_reason}")
-            if error_details:
-                print(f"error_details: {error_details}")
-
-            # PL: Błędy jakości próbujemy raz jeszcze w tym samym rozmiarze.
-            # EN: Quality errors are retried once more at the same batch size.
-            if (
-                reject_reason in QUALITY_REJECT_REASONS
-                and retry_number_for_this_size < MAX_RETRIES_PER_BATCH_SIZE
-            ):
-                stats["retry_count"] += 1
-
-                print("\n===== BATCH RETRY SAME SIZE =====")
-                print(f"batch_number: {batch_number}")
-                print(f"retry_reason: {reject_reason}")
-                print(f"retry_same_batch_size: {attempted_batch_size}")
-
-                attempt_number += 1
-                continue
-
-            # PL: Rate limit 429 zwykle nie oznacza złego batcha.
-            # EN: A 429 rate limit usually does not mean the batch itself is bad.
-            # PL: Najpierw czekamy chwilę i próbujemy jeszcze raz tym samym rozmiarem.
-            # EN: First we wait briefly and retry with the same batch size.
-            if (
-                reject_reason == "rate_limit"
-                and retry_number_for_this_size < MAX_RATE_LIMIT_RETRIES_PER_BATCH_SIZE
-            ):
-                wait_seconds = extract_rate_limit_wait_seconds(error_details)
-                stats["rate_limit_retry_count"] += 1
-
-                print("\n===== RATE LIMIT WAIT =====")
-                print(f"batch_number: {batch_number}")
-                print(f"wait_seconds: {wait_seconds:.2f}")
-                print(f"retry_same_batch_size_after_wait: {attempted_batch_size}")
-
-                time.sleep(wait_seconds)
-
-                attempt_number += 1
-                continue
-
-            # PL: Błędy outputowe sterują głównym fallbackiem 10 -> 5 -> 3.
-            # EN: Output errors drive the main fallback path 10 -> 5 -> 3.
-            if reject_reason in OUTPUT_REJECT_REASONS:
-                if (
-                    attempted_batch_size == primary_batch_size
-                    and primary_batch_size > fallback_batch_size
-                    and fallback_batch_size > 0
-                ):
-                    print("\n===== BATCH FALLBACK =====")
-                    print(f"batch_number: {batch_number}")
-                    print(f"fallback_reason: {reject_reason}")
-                    print(f"fallback_from: {attempted_batch_size}")
-                    print(f"fallback_to: {fallback_batch_size}")
-
-                    if attempted_batch_size == 10 and fallback_batch_size == 5:
-                        stats["fallback_10_to_5_count"] += 1
-
-                    locked_batch_size = lock_safe_batch_size(
-                        current_locked_batch_size=locked_batch_size,
-                        new_locked_batch_size=fallback_batch_size,
-                        batch_number=batch_number,
-                    )
-
-                    attempted_batch_size = fallback_batch_size
-                    attempt_number += 1
-                    continue
-
-                if attempted_batch_size <= FALLBACK_BATCH_SIZE and attempted_batch_size > MIN_SAFE_BATCH_SIZE:
-                    next_safe_batch_size = normalize_batch_size(
-                        attempted_batch_size - OUTPUT_BATCH_STEP_DOWN,
-                        remaining_questions,
-                    )
-
-                    if next_safe_batch_size < 1:
-                        next_safe_batch_size = 1
-
-                    print("\n===== BATCH OUTPUT FALLBACK =====")
-                    print(f"batch_number: {batch_number}")
-                    print(f"fallback_reason: {reject_reason}")
-                    print(f"fallback_from: {attempted_batch_size}")
-                    print(f"fallback_to: {next_safe_batch_size}")
-
-                    if attempted_batch_size == 5 and next_safe_batch_size == 3:
-                        stats["fallback_5_to_3_count"] += 1
-
-                    locked_batch_size = lock_safe_batch_size(
-                        current_locked_batch_size=locked_batch_size,
-                        new_locked_batch_size=next_safe_batch_size,
-                        batch_number=batch_number,
-                    )
-
-                    attempted_batch_size = next_safe_batch_size
-                    attempt_number += 1
-                    continue
-
-            next_batch_size = reduce_batch_size(
-                attempted_batch_size,
-                remaining_questions,
-            )
-
-            if next_batch_size > 0:
-                print("\n===== BATCH REDUCE =====")
-                print(f"batch_number: {batch_number}")
-                print(f"reduce_reason: {reject_reason}")
-                print(f"reduce_from: {attempted_batch_size}")
-                print(f"reduce_to: {next_batch_size}")
-
-            attempted_batch_size = next_batch_size
-            attempt_number += 1
-
-        if accepted_batch is None:
-            print("\n===== BATCH FAILED =====")
-            print(f"batch_number: {batch_number}")
-            print("LLM error: could not generate a valid batch.")
-
-            print_generation_batching_summary(
-                topic=topic,
-                difficulty=difficulty,
-                requested_questions=num_questions,
-                generated_questions=len(accepted_questions),
-                locked_batch_size=locked_batch_size,
-                stats=stats,
-                completed=False,
-            )
-            return None
-
-        batch_quiz = accepted_batch["quiz"]
-        batch_questions = batch_quiz.get("questions", [])
-        output_tokens = accepted_batch.get("output_tokens")
-        returned_questions = accepted_batch.get("returned_questions", len(batch_questions))
-
-        accepted_questions.extend(batch_questions)
-        stats["total_batches"] += 1
-
-        if batch_quiz.get("quiz_title"):
-            final_quiz_title = batch_quiz["quiz_title"]
-
-        remaining_questions = num_questions - len(accepted_questions)
-
-        print("\n===== BATCH ACCEPTED =====")
-        print(f"batch_number: {batch_number}")
-        print(f"accepted_now: {len(batch_questions)}")
-        print(f"accepted_total: {len(accepted_questions)}")
-        print(f"remaining_questions: {remaining_questions}")
-        print(f"returned_questions: {returned_questions}")
-        print(f"output_tokens: {output_tokens}")
-        print(f"locked_batch_size_after_accept: {locked_batch_size}")
-
-        batch_number += 1
-
-    final_quiz = {
-        "quiz_title": final_quiz_title,
-        "questions": accepted_questions[:num_questions],
-    }
+def finalize_generation_success(
+    topic: str,
+    difficulty: str,
+    state: dict,
+) -> dict:
+    # PL: Składamy finalny quiz i pilnujemy końcowej walidacji.
+    # EN: Build the final quiz and enforce final validation.
+    final_quiz = build_quiz_from_state(state, fallback_title=topic)
 
     try:
         Quiz.model_validate(final_quiz)
 
+        state["completed"] = True
+        state["failed"] = False
+        state["last_error"] = None
+
         print_generation_batching_summary(
             topic=topic,
             difficulty=difficulty,
-            requested_questions=num_questions,
+            requested_questions=state["requested_questions"],
             generated_questions=len(final_quiz["questions"]),
-            locked_batch_size=locked_batch_size,
-            stats=stats,
+            locked_batch_size=state["locked_batch_size"],
+            stats=state["stats"],
             completed=True,
         )
-        return final_quiz
+
+        return {
+            "ok": True,
+            "completed": True,
+            "failed": False,
+            "state": state,
+            "quiz": final_quiz,
+            "new_questions": [],
+            "remaining_questions": 0,
+        }
 
     except ValidationError as e:
+        state["completed"] = False
+        state["failed"] = True
+        state["last_error"] = compact_error_details(str(e))
+
         print("Final quiz validation error:", e)
 
         print_generation_batching_summary(
             topic=topic,
             difficulty=difficulty,
-            requested_questions=num_questions,
+            requested_questions=state["requested_questions"],
+            generated_questions=len(state["accepted_questions"]),
+            locked_batch_size=state["locked_batch_size"],
+            stats=state["stats"],
+            completed=False,
+        )
+
+        return {
+            "ok": False,
+            "completed": False,
+            "failed": True,
+            "state": state,
+            "quiz": None,
+            "new_questions": [],
+            "remaining_questions": state["requested_questions"] - len(state["accepted_questions"]),
+            "error": state["last_error"],
+        }
+
+
+def _generate_one_accepted_batch(
+    topic: str,
+    difficulty: str,
+    state: dict,
+) -> dict:
+    # PL: Ta funkcja robi dokładnie jedną udaną paczkę albo kończy się porażką.
+    # EN: This function produces exactly one accepted batch or ends in failure.
+    requested_questions = state["requested_questions"]
+    accepted_questions = state["accepted_questions"]
+    batch_number = state["batch_number"]
+    locked_batch_size = state["locked_batch_size"]
+    stats = state["stats"]
+
+    remaining_questions = requested_questions - len(accepted_questions)
+    accepted_batch = None
+
+    primary_batch_size = normalize_batch_size(locked_batch_size, remaining_questions)
+    fallback_batch_size = normalize_batch_size(FALLBACK_BATCH_SIZE, remaining_questions)
+
+    attempted_batch_size = primary_batch_size
+    attempt_number = 1
+    retries_for_size: dict[int, int] = {}
+
+    while attempted_batch_size > 0:
+        retries_for_size[attempted_batch_size] = retries_for_size.get(attempted_batch_size, 0) + 1
+        retry_number_for_this_size = retries_for_size[attempted_batch_size]
+
+        attempt_label = get_attempt_label(
+            attempted_batch_size=attempted_batch_size,
+            primary_batch_size=primary_batch_size,
+            fallback_batch_size=fallback_batch_size,
+        )
+
+        print("\n===== BATCH SEARCH =====")
+        print(f"batch_number: {batch_number}")
+        print(f"attempt_number: {attempt_number}")
+        print(f"attempt_label: {attempt_label}")
+        print(f"retry_number_for_this_size: {retry_number_for_this_size}")
+        print(f"remaining_questions: {remaining_questions}")
+        print(f"trying_batch_size: {attempted_batch_size}")
+        print(f"locked_batch_size: {locked_batch_size}")
+
+        batch_result = generate_quiz_batch(topic, difficulty, attempted_batch_size)
+
+        if batch_result["ok"]:
+            accepted_batch = batch_result
+            break
+
+        reject_reason = batch_result["reject_reason"]
+        error_details = batch_result["error_details"]
+        reject_family = classify_reject_family(reject_reason)
+
+        stats["rejected_batches"] += 1
+        if reject_reason == "rate_limit":
+            stats["rate_limit_reject_count"] += 1
+
+        if reject_family == "quality":
+            stats["quality_reject_count"] += 1
+        elif reject_family == "output":
+            stats["output_reject_count"] += 1
+        else:
+            stats["other_reject_count"] += 1
+
+        print("\n===== BATCH REJECTED =====")
+        print(f"batch_number: {batch_number}")
+        print(f"attempt_number: {attempt_number}")
+        print(f"attempt_label: {attempt_label}")
+        print(f"requested_in_batch: {attempted_batch_size}")
+        print(f"reject_reason: {reject_reason}")
+        if error_details:
+            print(f"error_details: {error_details}")
+
+        # PL: Błędy jakości próbujemy raz jeszcze w tym samym rozmiarze.
+        # EN: Quality errors are retried once more at the same batch size.
+        if (
+            reject_reason in QUALITY_REJECT_REASONS
+            and retry_number_for_this_size < MAX_RETRIES_PER_BATCH_SIZE
+        ):
+            stats["retry_count"] += 1
+
+            print("\n===== BATCH RETRY SAME SIZE =====")
+            print(f"batch_number: {batch_number}")
+            print(f"retry_reason: {reject_reason}")
+            print(f"retry_same_batch_size: {attempted_batch_size}")
+
+            attempt_number += 1
+            continue
+
+        # PL: Rate limit 429 zwykle nie oznacza złego batcha.
+        # EN: A 429 rate limit usually does not mean the batch itself is bad.
+        if (
+            reject_reason == "rate_limit"
+            and retry_number_for_this_size < MAX_RATE_LIMIT_RETRIES_PER_BATCH_SIZE
+        ):
+            wait_seconds = extract_rate_limit_wait_seconds(error_details)
+            stats["rate_limit_retry_count"] += 1
+
+            print("\n===== RATE LIMIT WAIT =====")
+            print(f"batch_number: {batch_number}")
+            print(f"wait_seconds: {wait_seconds:.2f}")
+            print(f"retry_same_batch_size_after_wait: {attempted_batch_size}")
+
+            time.sleep(wait_seconds)
+
+            attempt_number += 1
+            continue
+
+        # PL: Błędy outputowe sterują głównym fallbackiem 10 -> 5 -> 3.
+        # EN: Output errors drive the main fallback path 10 -> 5 -> 3.
+        if reject_reason in OUTPUT_REJECT_REASONS:
+            if (
+                attempted_batch_size == primary_batch_size
+                and primary_batch_size > fallback_batch_size
+                and fallback_batch_size > 0
+            ):
+                print("\n===== BATCH FALLBACK =====")
+                print(f"batch_number: {batch_number}")
+                print(f"fallback_reason: {reject_reason}")
+                print(f"fallback_from: {attempted_batch_size}")
+                print(f"fallback_to: {fallback_batch_size}")
+
+                if attempted_batch_size == 10 and fallback_batch_size == 5:
+                    stats["fallback_10_to_5_count"] += 1
+
+                locked_batch_size = lock_safe_batch_size(
+                    current_locked_batch_size=locked_batch_size,
+                    new_locked_batch_size=fallback_batch_size,
+                    batch_number=batch_number,
+                )
+                state["locked_batch_size"] = locked_batch_size
+
+                attempted_batch_size = fallback_batch_size
+                attempt_number += 1
+                continue
+
+            if attempted_batch_size <= FALLBACK_BATCH_SIZE and attempted_batch_size > MIN_SAFE_BATCH_SIZE:
+                next_safe_batch_size = normalize_batch_size(
+                    attempted_batch_size - OUTPUT_BATCH_STEP_DOWN,
+                    remaining_questions,
+                )
+
+                if next_safe_batch_size < 1:
+                    next_safe_batch_size = 1
+
+                print("\n===== BATCH OUTPUT FALLBACK =====")
+                print(f"batch_number: {batch_number}")
+                print(f"fallback_reason: {reject_reason}")
+                print(f"fallback_from: {attempted_batch_size}")
+                print(f"fallback_to: {next_safe_batch_size}")
+
+                if attempted_batch_size == 5 and next_safe_batch_size == 3:
+                    stats["fallback_5_to_3_count"] += 1
+
+                locked_batch_size = lock_safe_batch_size(
+                    current_locked_batch_size=locked_batch_size,
+                    new_locked_batch_size=next_safe_batch_size,
+                    batch_number=batch_number,
+                )
+                state["locked_batch_size"] = locked_batch_size
+
+                attempted_batch_size = next_safe_batch_size
+                attempt_number += 1
+                continue
+
+        next_batch_size = reduce_batch_size(
+            attempted_batch_size,
+            remaining_questions,
+        )
+
+        if next_batch_size > 0:
+            print("\n===== BATCH REDUCE =====")
+            print(f"batch_number: {batch_number}")
+            print(f"reduce_reason: {reject_reason}")
+            print(f"reduce_from: {attempted_batch_size}")
+            print(f"reduce_to: {next_batch_size}")
+
+        attempted_batch_size = next_batch_size
+        attempt_number += 1
+
+    if accepted_batch is None:
+        print("\n===== BATCH FAILED =====")
+        print(f"batch_number: {batch_number}")
+        print("LLM error: could not generate a valid batch.")
+
+        state["failed"] = True
+        state["last_error"] = "LLM error: could not generate a valid batch."
+
+        print_generation_batching_summary(
+            topic=topic,
+            difficulty=difficulty,
+            requested_questions=requested_questions,
             generated_questions=len(accepted_questions),
-            locked_batch_size=locked_batch_size,
+            locked_batch_size=state["locked_batch_size"],
             stats=stats,
             completed=False,
         )
+
+        return {
+            "ok": False,
+            "completed": False,
+            "failed": True,
+            "state": state,
+            "quiz": None,
+            "new_questions": [],
+            "remaining_questions": remaining_questions,
+            "error": state["last_error"],
+        }
+
+    batch_quiz = accepted_batch["quiz"]
+    batch_questions = batch_quiz.get("questions", [])
+    output_tokens = accepted_batch.get("output_tokens")
+    returned_questions = accepted_batch.get("returned_questions", len(batch_questions))
+
+    accepted_questions.extend(batch_questions)
+    stats["total_batches"] += 1
+
+    if batch_quiz.get("quiz_title"):
+        state["final_quiz_title"] = batch_quiz["quiz_title"]
+
+    remaining_questions = requested_questions - len(accepted_questions)
+
+    print("\n===== BATCH ACCEPTED =====")
+    print(f"batch_number: {batch_number}")
+    print(f"accepted_now: {len(batch_questions)}")
+    print(f"accepted_total: {len(accepted_questions)}")
+    print(f"remaining_questions: {remaining_questions}")
+    print(f"returned_questions: {returned_questions}")
+    print(f"output_tokens: {output_tokens}")
+    print(f"locked_batch_size_after_accept: {state['locked_batch_size']}")
+
+    state["batch_number"] += 1
+
+    partial_quiz = build_quiz_from_state(state, fallback_title=topic)
+
+    return {
+        "ok": True,
+        "completed": False,
+        "failed": False,
+        "state": state,
+        "quiz": partial_quiz,
+        "new_questions": batch_questions,
+        "remaining_questions": remaining_questions,
+        "accepted_now": len(batch_questions),
+        "accepted_total": len(accepted_questions),
+        "output_tokens": output_tokens,
+        "returned_questions": returned_questions,
+    }
+
+
+def generate_next_quiz_chunk(
+    topic: str,
+    difficulty: str,
+    state: dict,
+) -> dict:
+    # PL: Główne API do MVP partial loading.
+    # EN: Main API for the partial loading MVP.
+    if not isinstance(state, dict):
+        return {
+            "ok": False,
+            "completed": False,
+            "failed": True,
+            "state": None,
+            "quiz": None,
+            "new_questions": [],
+            "remaining_questions": 0,
+            "error": "generation state must be a dict",
+        }
+
+    requested_questions = state.get("requested_questions")
+    if not isinstance(requested_questions, int):
+        return {
+            "ok": False,
+            "completed": False,
+            "failed": True,
+            "state": state,
+            "quiz": None,
+            "new_questions": [],
+            "remaining_questions": 0,
+            "error": "generation state is missing requested_questions",
+        }
+
+    if requested_questions < 1 or requested_questions > DEFAULT_BATCH_QUESTION_LIMIT:
+        error_message = (
+            f"Invalid question count: {requested_questions}. "
+            f"Allowed range is 1-{DEFAULT_BATCH_QUESTION_LIMIT}."
+        )
+        state["failed"] = True
+        state["last_error"] = error_message
+
+        return {
+            "ok": False,
+            "completed": False,
+            "failed": True,
+            "state": state,
+            "quiz": None,
+            "new_questions": [],
+            "remaining_questions": 0,
+            "error": error_message,
+        }
+
+    if state.get("completed"):
+        final_quiz = build_quiz_from_state(state, fallback_title=topic)
+        return {
+            "ok": True,
+            "completed": True,
+            "failed": False,
+            "state": state,
+            "quiz": final_quiz,
+            "new_questions": [],
+            "remaining_questions": 0,
+        }
+
+    if state.get("failed"):
+        return {
+            "ok": False,
+            "completed": False,
+            "failed": True,
+            "state": state,
+            "quiz": None,
+            "new_questions": [],
+            "remaining_questions": requested_questions - len(state.get("accepted_questions", [])),
+            "error": state.get("last_error"),
+        }
+
+    step_result = _generate_one_accepted_batch(topic, difficulty, state)
+    if not step_result["ok"]:
+        return step_result
+
+    if len(state["accepted_questions"]) >= requested_questions:
+        return finalize_generation_success(topic, difficulty, state)
+
+    return step_result
+
+
+def start_partial_quiz_generation(
+    topic: str,
+    difficulty: str,
+    num_questions: int,
+) -> dict:
+    # PL: Wygodny start do UI - tworzy stan i od razu próbuje pobrać pierwszy batch.
+    # EN: UI-friendly starter - creates state and immediately tries to fetch the first batch.
+    state = create_generation_state(num_questions)
+    return generate_next_quiz_chunk(topic, difficulty, state)
+
+
+def generate_quiz_2(topic: str, difficulty: str, num_questions: int) -> dict | None:
+    # PL: Stary tryb pełny zostaje dla kompatybilności.
+    # EN: The old full mode stays for compatibility.
+    start_result = start_partial_quiz_generation(topic, difficulty, num_questions)
+    if not start_result["ok"]:
         return None
+
+    state = start_result["state"]
+
+    while not state["completed"] and not state["failed"]:
+        step_result = generate_next_quiz_chunk(topic, difficulty, state)
+        if not step_result["ok"]:
+            return None
+
+    if state["failed"]:
+        return None
+
+    return build_quiz_from_state(state, fallback_title=topic)
 
 
 if __name__ == "__main__":
