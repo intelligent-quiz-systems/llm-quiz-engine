@@ -25,6 +25,7 @@ if st.session_state.app_step == "config":
     config = render_config_screen()
 
     if config and config.get("submitted"):
+        
         difficulty_pl = str(config["difficulty"])
 
         difficulty_map = {
