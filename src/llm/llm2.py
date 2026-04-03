@@ -181,6 +181,63 @@ def evaluate_batch_quality(quiz_json: dict) -> dict | None:
     return None
 
 
+def build_cross_batch_candidate_quiz(
+    state: dict,
+    batch_quiz: dict,
+    fallback_title: str,
+) -> dict:
+    accepted_questions = state.get("accepted_questions", [])
+    batch_questions = batch_quiz.get("questions", [])
+
+    quiz_title = (
+        batch_quiz.get("quiz_title")
+        or state.get("final_quiz_title")
+        or fallback_title
+    )
+
+    return {
+        "quiz_title": quiz_title,
+        "questions": [*accepted_questions, *batch_questions],
+    }
+
+
+def evaluate_cross_batch_quality(
+    state: dict,
+    batch_quiz: dict,
+    fallback_title: str,
+) -> dict | None:
+    # PL: Jeśli to pierwszy zaakceptowany batch, nie ma jeszcze czego porównywać.
+    # EN: If this is the first accepted batch, there is nothing to compare against yet.
+    accepted_questions = state.get("accepted_questions", [])
+    if not accepted_questions:
+        return None
+
+    combined_quiz = build_cross_batch_candidate_quiz(
+        state=state,
+        batch_quiz=batch_quiz,
+        fallback_title=fallback_title,
+    )
+
+    duplicate_questions = find_duplicate_questions(combined_quiz)
+    if duplicate_questions:
+        return reject_batch(
+            reject_reason="duplicate_questions",
+            error_details=compact_issue_list(duplicate_questions),
+        )
+
+    similar_questions = find_similar_questions(
+        combined_quiz,
+        threshold=SIMILAR_QUESTION_THRESHOLD,
+    )
+    if similar_questions:
+        return reject_batch(
+            reject_reason="similar_questions",
+            error_details=compact_issue_list(similar_questions),
+        )
+
+    return None
+
+
 def lock_safe_batch_size(
     current_locked_batch_size: int,
     new_locked_batch_size: int,
@@ -571,8 +628,17 @@ def _generate_one_accepted_batch(
         batch_result = generate_quiz_batch(topic, difficulty, attempted_batch_size)
 
         if batch_result["ok"]:
-            accepted_batch = batch_result
-            break
+            cross_batch_quality_result = evaluate_cross_batch_quality(
+                state=state,
+                batch_quiz=batch_result["quiz"],
+                fallback_title=topic,
+            )
+
+            if cross_batch_quality_result is None:
+                accepted_batch = batch_result
+                break
+
+            batch_result = cross_batch_quality_result
 
         reject_reason = batch_result["reject_reason"]
         error_details = batch_result["error_details"]

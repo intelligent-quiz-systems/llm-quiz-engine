@@ -441,7 +441,8 @@ def render_sidebar_status(quiz, config):
 
 
 def render_quiz_screen(quiz, config):
-    st_autorefresh(interval=10000, key="quiz_timer")
+    if not is_quiz_fully_loaded(quiz, config):
+        st_autorefresh(interval=5000, key="quiz_timer")
 
     is_valid, error_message = validate_quiz(quiz)
     if not is_valid:
