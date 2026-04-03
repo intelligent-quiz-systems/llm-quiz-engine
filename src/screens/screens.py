@@ -418,14 +418,19 @@ def render_sidebar_status(quiz, config):
     ready_questions = get_ready_question_count(quiz)
     target_questions = get_target_question_count(quiz, config)
     answered = count_answered_questions(quiz)
-    progress = answered / ready_questions if ready_questions > 0 else 0.0
+
+    # PL: Pasek postępu liczymy względem pełnej docelowej puli pytań.
+    # EN: Progress bar is calculated against the full target question pool.
+    answered_for_progress = min(answered, target_questions) if target_questions > 0 else 0
+    progress = answered_for_progress / target_questions if target_questions > 0 else 0.0
+
     available_pages = get_available_page_count(quiz)
     target_pages = get_target_page_count(quiz, config)
     current_page_display = min(st.session_state.current_page + 1, available_pages)
 
     with st.sidebar:
         st.header(quiz.get("topic") or quiz.get("quiz_title", "Quiz"))
-        st.progress(progress, text=f"Postęp odpowiedzi: {answered}/{ready_questions}")
+        st.progress(progress, text=f"Postęp odpowiedzi: {answered}/{target_questions}")
         st.write(f"**Gotowe pytania:** {ready_questions}/{target_questions}")
         st.write(f"**Dostępne strony teraz:** {current_page_display}/{available_pages}")
         st.write(f"**Strony docelowo:** {target_pages}")

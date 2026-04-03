@@ -32,6 +32,7 @@ DEFAULT_RATE_LIMIT_WAIT_SECONDS = 3.0
 MIN_RATE_LIMIT_WAIT_SECONDS = 0.5
 MAX_RATE_LIMIT_WAIT_SECONDS = 8.0
 LONG_RATE_LIMIT_WAIT_THRESHOLD_SECONDS = 60.0
+RECENT_QUESTION_AVOID_LIMIT = 12
 
 # PL: Przełączniki debugowe dla szczegółowych sekcji logów.
 # EN: Debug toggles for verbose log sections.
@@ -181,58 +182,122 @@ def evaluate_batch_quality(quiz_json: dict) -> dict | None:
     return None
 
 
-def build_cross_batch_candidate_quiz(
+def normalize_question_text(text: str) -> str:
+    normalized = str(text).strip().lower()
+    normalized = re.sub(r"\s+", " ", normalized)
+    normalized = re.sub(r"[?!.]+$", "", normalized)
+    return normalized
+
+
+def extract_recent_question_texts(
+    state: dict,
+    limit: int = RECENT_QUESTION_AVOID_LIMIT,
+) -> list[str]:
+    accepted_questions = state.get("accepted_questions", [])
+    recent_questions = accepted_questions[-limit:]
+
+    seen: set[str] = set()
+    result: list[str] = []
+
+    for question in recent_questions:
+        question_text = question.get("question")
+        if not isinstance(question_text, str):
+            continue
+
+        cleaned_question_text = question_text.strip()
+        if not cleaned_question_text:
+            continue
+
+        normalized_question_text = normalize_question_text(cleaned_question_text)
+        if normalized_question_text in seen:
+            continue
+
+        seen.add(normalized_question_text)
+        result.append(cleaned_question_text)
+
+    return result
+
+
+def build_recent_question_guardrail(question_texts: list[str]) -> str:
+    if not question_texts:
+        return ""
+
+    formatted_questions = "\n".join(
+        f"- {question_text}"
+        for question_text in question_texts
+    )
+
+    return f"""
+Already accepted recent question stems. Do not repeat them and do not create near-clones of them:
+{formatted_questions}
+"""
+
+
+def find_cross_batch_duplicate_questions(
     state: dict,
     batch_quiz: dict,
-    fallback_title: str,
-) -> dict:
+) -> list[str]:
     accepted_questions = state.get("accepted_questions", [])
     batch_questions = batch_quiz.get("questions", [])
 
-    quiz_title = (
-        batch_quiz.get("quiz_title")
-        or state.get("final_quiz_title")
-        or fallback_title
-    )
+    accepted_question_positions: dict[str, int] = {}
 
-    return {
-        "quiz_title": quiz_title,
-        "questions": [*accepted_questions, *batch_questions],
-    }
+    for accepted_index, accepted_question in enumerate(accepted_questions, start=1):
+        question_text = accepted_question.get("question")
+        if not isinstance(question_text, str):
+            continue
+
+        normalized_question_text = normalize_question_text(question_text)
+        if not normalized_question_text:
+            continue
+
+        if normalized_question_text not in accepted_question_positions:
+            accepted_question_positions[normalized_question_text] = accepted_index
+
+    issues: list[str] = []
+    accepted_count = len(accepted_questions)
+
+    for batch_index, batch_question in enumerate(batch_questions, start=1):
+        question_text = batch_question.get("question")
+        if not isinstance(question_text, str):
+            continue
+
+        normalized_question_text = normalize_question_text(question_text)
+        if not normalized_question_text:
+            continue
+
+        accepted_index = accepted_question_positions.get(normalized_question_text)
+        if accepted_index is None:
+            continue
+
+        global_batch_index = accepted_count + batch_index
+        issues.append(
+            f"Duplicate question: Q{accepted_index} and Q{global_batch_index}"
+        )
+
+    return issues
 
 
 def evaluate_cross_batch_quality(
     state: dict,
     batch_quiz: dict,
-    fallback_title: str,
 ) -> dict | None:
-    # PL: Jeśli to pierwszy zaakceptowany batch, nie ma jeszcze czego porównywać.
-    # EN: If this is the first accepted batch, there is nothing to compare against yet.
+    # PL: Zostawiamy exact duplicate między batchami.
+    # PL: Cross-batch similar check wyłączamy, bo za bardzo spowalnia generowanie.
+    # EN: We keep exact duplicate checks across batches.
+    # EN: Cross-batch similar checks are disabled because they slow generation too much.
     accepted_questions = state.get("accepted_questions", [])
     if not accepted_questions:
         return None
 
-    combined_quiz = build_cross_batch_candidate_quiz(
+    duplicate_questions = find_cross_batch_duplicate_questions(
         state=state,
         batch_quiz=batch_quiz,
-        fallback_title=fallback_title,
     )
-
-    duplicate_questions = find_duplicate_questions(combined_quiz)
     if duplicate_questions:
         return reject_batch(
             reject_reason="duplicate_questions",
             error_details=compact_issue_list(duplicate_questions),
-        )
-
-    similar_questions = find_similar_questions(
-        combined_quiz,
-        threshold=SIMILAR_QUESTION_THRESHOLD,
-    )
-    if similar_questions:
-        return reject_batch(
-            reject_reason="similar_questions",
-            error_details=compact_issue_list(similar_questions),
         )
 
     return None
@@ -416,7 +481,15 @@ def print_generation_batching_summary(
     print(f"other_reject_count: {stats['other_reject_count']}")
 
 
-def generate_quiz_batch(topic: str, difficulty: str, num_questions: int) -> dict:
+def generate_quiz_batch(
+    topic: str,
+    difficulty: str,
+    num_questions: int,
+    recent_question_texts: list[str] | None = None,
+) -> dict:
+    recent_question_texts = recent_question_texts or []
+    recent_question_guardrail = build_recent_question_guardrail(recent_question_texts)
+
     system_prompt = """
         You are a quiz generator.
 
@@ -454,6 +527,10 @@ def generate_quiz_batch(topic: str, difficulty: str, num_questions: int) -> dict
         - each question must have exactly 4 options
         - correct_index must be between 0 and 3
         - include quiz_title
+        - avoid duplicates
+        - avoid repeating the same question wording
+
+        {recent_question_guardrail}
 
         Return ONLY JSON.
     """
@@ -605,6 +682,7 @@ def _generate_one_accepted_batch(
     attempted_batch_size = primary_batch_size
     attempt_number = 1
     retries_for_size: dict[int, int] = {}
+    recent_question_texts = extract_recent_question_texts(state)
 
     while attempted_batch_size > 0:
         retries_for_size[attempted_batch_size] = retries_for_size.get(attempted_batch_size, 0) + 1
@@ -625,13 +703,17 @@ def _generate_one_accepted_batch(
         print(f"trying_batch_size: {attempted_batch_size}")
         print(f"locked_batch_size: {locked_batch_size}")
 
-        batch_result = generate_quiz_batch(topic, difficulty, attempted_batch_size)
+        batch_result = generate_quiz_batch(
+            topic=topic,
+            difficulty=difficulty,
+            num_questions=attempted_batch_size,
+            recent_question_texts=recent_question_texts,
+        )
 
         if batch_result["ok"]:
             cross_batch_quality_result = evaluate_cross_batch_quality(
                 state=state,
                 batch_quiz=batch_result["quiz"],
-                fallback_title=topic,
             )
 
             if cross_batch_quality_result is None:
