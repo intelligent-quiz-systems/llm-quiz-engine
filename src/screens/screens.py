@@ -267,6 +267,44 @@ def difficulty_label(value):
     return str(value) if value is not None else "—"
 
 
+def get_ready_question_count(quiz):
+    return len(quiz.get("questions", []))
+
+
+def get_target_question_count(quiz, config):
+    target_from_config = config.get("question_count") if config else None
+    target_from_quiz = quiz.get("question_count") if quiz else None
+    ready_questions = get_ready_question_count(quiz)
+
+    if isinstance(target_from_config, int) and target_from_config > 0:
+        return target_from_config
+
+    if isinstance(target_from_quiz, int) and target_from_quiz > 0:
+        return target_from_quiz
+
+    return ready_questions
+
+
+def get_available_page_count(quiz):
+    ready_questions = get_ready_question_count(quiz)
+    if ready_questions <= 0:
+        return 1
+    return math.ceil(ready_questions / QUIZ_PAGE_SIZE)
+
+
+def get_target_page_count(quiz, config):
+    target_questions = get_target_question_count(quiz, config)
+    if target_questions <= 0:
+        return 1
+    return math.ceil(target_questions / QUIZ_PAGE_SIZE)
+
+
+def is_quiz_fully_loaded(quiz, config):
+    ready_questions = get_ready_question_count(quiz)
+    target_questions = get_target_question_count(quiz, config)
+    return ready_questions >= target_questions
+
+
 def render_config_screen():
     st.title("Generator quizu")
 
@@ -377,18 +415,28 @@ def render_sidebar_timer():
 
 
 def render_sidebar_status(quiz, config):
-    questions = quiz.get("questions", [])
-    total_questions = len(questions)
+    ready_questions = get_ready_question_count(quiz)
+    target_questions = get_target_question_count(quiz, config)
     answered = count_answered_questions(quiz)
-    progress = answered / total_questions if total_questions > 0 else 0.0
-    total_pages = math.ceil(total_questions / QUIZ_PAGE_SIZE) if total_questions > 0 else 1
+    progress = answered / ready_questions if ready_questions > 0 else 0.0
+    available_pages = get_available_page_count(quiz)
+    target_pages = get_target_page_count(quiz, config)
+    current_page_display = min(st.session_state.current_page + 1, available_pages)
 
     with st.sidebar:
         st.header(quiz.get("topic") or quiz.get("quiz_title", "Quiz"))
-        st.progress(progress, text=f"Postęp: {answered}/{total_questions}")
-        st.write(f"**Strona:** {st.session_state.current_page + 1}/{total_pages}")
+        st.progress(progress, text=f"Postęp odpowiedzi: {answered}/{ready_questions}")
+        st.write(f"**Gotowe pytania:** {ready_questions}/{target_questions}")
+        st.write(f"**Dostępne strony teraz:** {current_page_display}/{available_pages}")
+        st.write(f"**Strony docelowo:** {target_pages}")
         st.write(f"**Trudność:** {difficulty_label(config.get('difficulty'))}")
         st.write(f"**Limit czasu:** {config.get('time_limit', DEFAULT_TIME_LIMIT_MINUTES)} min")
+
+        if is_quiz_fully_loaded(quiz, config):
+            st.success("Quiz jest już w pełni załadowany.")
+        else:
+            st.info("Quiz nadal dogrywa się partiami.")
+
         render_sidebar_timer()
 
 
@@ -405,10 +453,21 @@ def render_quiz_screen(quiz, config):
     questions = quiz["questions"]
     render_sidebar_status(quiz, config)
 
+    ready_questions = get_ready_question_count(quiz)
+    target_questions = get_target_question_count(quiz, config)
+    available_pages = get_available_page_count(quiz)
+
     st.title(quiz.get("quiz_title", quiz.get("topic", "Quiz")))
 
-    total_pages = math.ceil(len(questions) / QUIZ_PAGE_SIZE)
+    if is_quiz_fully_loaded(quiz, config):
+        st.success(f"Quiz gotowy. Wczytano wszystkie pytania: {ready_questions}/{target_questions}.")
+    else:
+        st.info(f"Quiz nadal się dogrywa. Aktualnie gotowe pytania: {ready_questions}/{target_questions}.")
+
     page = st.session_state.current_page
+    if page >= available_pages:
+        st.session_state.current_page = max(0, available_pages - 1)
+        page = st.session_state.current_page
 
     start = page * QUIZ_PAGE_SIZE
     end = min(start + QUIZ_PAGE_SIZE, len(questions))
@@ -443,7 +502,7 @@ def render_quiz_screen(quiz, config):
             st.rerun()
 
     with col2:
-        if st.button("Dalej", disabled=(page >= total_pages - 1)):
+        if st.button("Dalej", disabled=(page >= available_pages - 1)):
             st.session_state.current_page += 1
             st.rerun()
 
@@ -477,7 +536,9 @@ def render_results_screen(quiz, config):
     st.title("Wyniki quizu")
 
     score = calculate_score(quiz)
-    total = len(quiz["questions"])
+    ready_questions = get_ready_question_count(quiz)
+    target_questions = get_target_question_count(quiz, config)
+    total = ready_questions
 
     with st.sidebar:
         st.header("Wyniki")
@@ -485,11 +546,17 @@ def render_results_screen(quiz, config):
         st.write(f"**Temat:** {quiz.get('topic') or quiz.get('quiz_title', 'Quiz')}")
         st.write(f"**Trudność:** {difficulty_label(config.get('difficulty'))}")
         st.write(f"**Limit czasu:** {config.get('time_limit', DEFAULT_TIME_LIMIT_MINUTES)} min")
+        st.write(f"**Gotowe pytania przy zakończeniu:** {ready_questions}/{target_questions}")
 
     if st.session_state.timeout_happened:
         st.warning("Czas minął. Quiz został zakończony automatycznie.")
 
-    st.success(f"Wynik: {score}/{total}")
+    if is_quiz_fully_loaded(quiz, config):
+        st.success(f"Wynik: {score}/{total}")
+        st.info(f"Quiz zakończono po pełnym załadowaniu: {ready_questions}/{target_questions}.")
+    else:
+        st.success(f"Wynik: {score}/{total}")
+        st.warning(f"Quiz zakończono przy częściowym załadowaniu: {ready_questions}/{target_questions}.")
 
     for i, q in enumerate(quiz["questions"]):
         correct = q["options"][q["correct_index"]]
