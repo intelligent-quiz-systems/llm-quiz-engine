@@ -788,12 +788,22 @@ def _generate_one_accepted_batch(
                 error_details=error_details,
             )
 
-        # PL: Błędy jakości próbujemy raz jeszcze w tym samym rozmiarze.
-        # EN: Quality errors are retried once more at the same batch size.
-        if (
+        # PL: Błędy jakości zwykle próbujemy raz jeszcze w tym samym rozmiarze.
+        # PL: Wyjątek: duplicate_questions przy małych batchach (<= 5) od razu redukujemy,
+        # PL: bo ponowienie tej samej wielkości często tylko traci czas.
+        # EN: Quality errors are usually retried once more at the same batch size.
+        # EN: Exception: duplicate_questions for small batches (<= 5) are reduced immediately,
+        # EN: because retrying the same size often wastes time.
+        should_retry_same_size = (
             reject_reason in QUALITY_REJECT_REASONS
             and retry_number_for_this_size < MAX_RETRIES_PER_BATCH_SIZE
-        ):
+            and not (
+                reject_reason == "duplicate_questions"
+                and attempted_batch_size <= FALLBACK_BATCH_SIZE
+            )
+        )
+
+        if should_retry_same_size:
             stats["retry_count"] += 1
 
             print("\n===== BATCH RETRY SAME SIZE =====")

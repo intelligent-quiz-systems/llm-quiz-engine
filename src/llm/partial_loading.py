@@ -495,14 +495,16 @@ def continue_partial_quiz_flow() -> None:
 
         if isinstance(state, dict) and state.get("failed"):
             st.session_state.partial_generation_error = state.get("last_error")
-            st.session_state.partial_generation_halted = True
 
-            debug_partial_loading(
-                "CONTINUE EXIT - NO WORKER, STATE FAILED",
-                quiz_questions=get_quiz_question_count(st.session_state.get("quiz_data")),
-                state_questions=get_state_question_count(state),
-                error=st.session_state.partial_generation_error,
-            )
+            if not st.session_state.get("partial_generation_halted", False):
+                debug_partial_loading(
+                    "CONTINUE EXIT - NO WORKER, STATE FAILED",
+                    quiz_questions=get_quiz_question_count(st.session_state.get("quiz_data")),
+                    state_questions=get_state_question_count(state),
+                    error=state.get("last_error"),
+                )
+
+            st.session_state.partial_generation_halted = True
             return
 
         return
