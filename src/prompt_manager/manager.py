@@ -35,11 +35,16 @@ class PromptManager:
         return sorted(template["versions"].keys())
 
     def get_default_version(self, template_name: str) -> str:
-        """Zwraca domyślną wersję szablonu"""
+        """Zwraca domyślną wersję szablonu lub 'v1' jako bezpieczny fallback"""
         template = self.prompts.get(template_name)
         if template and "default_version" in template:
             return template["default_version"]
-        return "v1"
+        
+        # Jeśli nie ma default_version, ale istnieje wersja v1 – zwróć v1
+        if template and "versions" in template and "v1" in template["versions"]:
+            return "v1"
+        
+        return "v1"  # ostateczny fallback
 
     def get_prompt(self, template_name: str, version: str = None) -> Optional[Dict[str, Any]]:
         """
@@ -137,3 +142,4 @@ class PromptManager:
             "system": system,
             "user": user
         }
+    
