@@ -38,6 +38,7 @@ RECENT_QUESTION_AVOID_LIMIT = 12
 # EN: Debug toggles for verbose log sections.
 SHOW_RESULT_QUIZ_JSON = False
 SHOW_VALIDATED_QUIZ_JSON = False
+SHOW_OUTPUT_FAILURE_DEBUG = True
 
 QUALITY_REJECT_REASONS = {
     "structure_issues",
@@ -481,6 +482,32 @@ def print_generation_batching_summary(
     print(f"other_reject_count: {stats['other_reject_count']}")
 
 
+def print_output_failure_debug(
+    topic: str,
+    difficulty: str,
+    batch_number: int,
+    attempt_label: str,
+    attempted_batch_size: int,
+    locked_batch_size: int,
+    reject_reason: str,
+    error_details: str | None,
+) -> None:
+    if not SHOW_OUTPUT_FAILURE_DEBUG:
+        return
+
+    print("\n===== OUTPUT FAILURE DEBUG =====")
+    print(f"topic: {topic}")
+    print(f"difficulty: {difficulty}")
+    print(f"batch_number: {batch_number}")
+    print(f"attempt_label: {attempt_label}")
+    print(f"requested_in_batch: {attempted_batch_size}")
+    print(f"locked_batch_size: {locked_batch_size}")
+    print(f"reject_reason: {reject_reason}")
+
+    if error_details:
+        print(f"error_details: {error_details}")
+
+
 def generate_quiz_batch(
     topic: str,
     difficulty: str,
@@ -748,6 +775,18 @@ def _generate_one_accepted_batch(
         print(f"reject_reason: {reject_reason}")
         if error_details:
             print(f"error_details: {error_details}")
+
+        if reject_reason in OUTPUT_REJECT_REASONS:
+            print_output_failure_debug(
+                topic=topic,
+                difficulty=difficulty,
+                batch_number=batch_number,
+                attempt_label=attempt_label,
+                attempted_batch_size=attempted_batch_size,
+                locked_batch_size=locked_batch_size,
+                reject_reason=reject_reason,
+                error_details=error_details,
+            )
 
         # PL: Błędy jakości próbujemy raz jeszcze w tym samym rozmiarze.
         # EN: Quality errors are retried once more at the same batch size.

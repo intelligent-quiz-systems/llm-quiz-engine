@@ -482,13 +482,15 @@ def continue_partial_quiz_flow() -> None:
         state = st.session_state.get("generation_state")
         if isinstance(state, dict) and state.get("completed"):
             finalize_generation_timing_if_needed(config)
-            st.session_state.partial_generation_halted = True
 
-            debug_partial_loading(
-                "CONTINUE EXIT - NO WORKER, STATE COMPLETED",
-                quiz_questions=get_quiz_question_count(st.session_state.get("quiz_data")),
-                state_questions=get_state_question_count(state),
-            )
+            if not st.session_state.get("partial_generation_halted", False):
+                debug_partial_loading(
+                    "CONTINUE EXIT - NO WORKER, STATE COMPLETED",
+                    quiz_questions=get_quiz_question_count(st.session_state.get("quiz_data")),
+                    state_questions=get_state_question_count(state),
+                )
+
+            st.session_state.partial_generation_halted = True
             return
 
         if isinstance(state, dict) and state.get("failed"):

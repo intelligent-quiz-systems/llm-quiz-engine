@@ -12,7 +12,7 @@ OPTION_LABELS = ["A", "B", "C", "D", "E", "F"]
 DEFAULT_QUESTION_COUNT = 5
 DEFAULT_TIME_LIMIT_MINUTES = 10
 DEFAULT_TOPIC = "Podstawy Pythona"
-MAX_QUESTION_COUNT = 80
+MAX_QUESTION_COUNT = 100
 MAX_TIME_LIMIT_MINUTES = 200
 
 
@@ -446,7 +446,14 @@ def render_sidebar_status(quiz, config):
 
 
 def render_quiz_screen(quiz, config):
-    if not is_quiz_fully_loaded(quiz, config):
+    should_autorefresh = (
+        not is_quiz_fully_loaded(quiz, config)
+        and not st.session_state.get("partial_generation_halted", False)
+        and not st.session_state.get("partial_generation_error")
+        and bool(st.session_state.get("partial_generation_worker_id"))
+    )
+
+    if should_autorefresh:
         st_autorefresh(interval=8000, key="quiz_timer")
 
     is_valid, error_message = validate_quiz(quiz)
