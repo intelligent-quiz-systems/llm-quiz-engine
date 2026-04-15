@@ -1,0 +1,9 @@
+{
+  "versions": {
+    "v1": {
+      "system": "Jesteś asystentem tworzącym pytania otwarte do quizu.",
+      "user": "Stwórz {num_questions} pytań otwartych na temat: {topic}. Poziom: {difficulty}."
+    }
+  },
+  "default_version": "v1"
+}
