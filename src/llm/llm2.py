@@ -230,7 +230,7 @@ def build_recent_question_guardrail(question_texts: list[str]) -> str:
     )
 
     return f"""
-Already accepted question stems are listed below. Before generating new questions, mentally identify every Python concept, operator, built-in, and language feature already covered. Then generate questions that test only concepts NOT on that list — even if phrased differently, a question on the same concept counts as a duplicate.
+Already accepted question stems are listed below. Before generating new questions, mentally identify every concept, topic area, and specific aspect of the subject matter already covered. Then generate questions that test only concepts NOT on that list — even if phrased differently, a question on the same concept counts as a duplicate.
 {formatted_questions}
 """
 
