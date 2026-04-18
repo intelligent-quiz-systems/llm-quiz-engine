@@ -1,4 +1,5 @@
 import json
+import random
 import re
 import sys
 import time
@@ -463,6 +464,7 @@ def print_generation_batching_summary(
     locked_batch_size: int,
     stats: dict,
     completed: bool,
+    questions: list,
 ) -> None:
     print("\n===== BATCHING GENERATION SUMMARY =====")
     print(f"topic: {topic}")
@@ -481,6 +483,15 @@ def print_generation_batching_summary(
     print(f"quality_reject_count: {stats['quality_reject_count']}")
     print(f"output_reject_count: {stats['output_reject_count']}")
     print(f"other_reject_count: {stats['other_reject_count']}")
+    dist = {0: 0, 1: 0, 2: 0, 3: 0}
+    for q in questions:
+        idx = q.get("correct_index")
+        if idx in dist:
+            dist[idx] += 1
+    labels = {0: "A", 1: "B", 2: "C", 3: "D"}
+    print("correct_answer_distribution:")
+    for i, label in labels.items():
+        print(f"  {label}: {dist[i]}")
 
 
 def print_output_failure_debug(
@@ -601,6 +612,11 @@ def generate_quiz_batch(
         if quality_result is not None:
             return quality_result
 
+        for q in quiz_json.get("questions", []):
+            correct_text = q["options"][q["correct_index"]]
+            random.shuffle(q["options"])
+            q["correct_index"] = q["options"].index(correct_text)
+
         return accept_batch(
             quiz_json=quiz_json,
             output_tokens=output_tokens,
@@ -645,6 +661,7 @@ def finalize_generation_success(
             locked_batch_size=state["locked_batch_size"],
             stats=state["stats"],
             completed=True,
+            questions=final_quiz["questions"],
         )
 
         return {
@@ -672,6 +689,7 @@ def finalize_generation_success(
             locked_batch_size=state["locked_batch_size"],
             stats=state["stats"],
             completed=False,
+            questions=state["accepted_questions"],
         )
 
         return {
@@ -940,6 +958,7 @@ def _generate_one_accepted_batch(
             locked_batch_size=state["locked_batch_size"],
             stats=stats,
             completed=False,
+            questions=accepted_questions,
         )
 
         return {
