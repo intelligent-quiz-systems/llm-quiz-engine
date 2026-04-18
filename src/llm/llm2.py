@@ -32,12 +32,12 @@ DEFAULT_RATE_LIMIT_WAIT_SECONDS = 3.0
 MIN_RATE_LIMIT_WAIT_SECONDS = 0.5
 MAX_RATE_LIMIT_WAIT_SECONDS = 8.0
 LONG_RATE_LIMIT_WAIT_THRESHOLD_SECONDS = 60.0
-RECENT_QUESTION_AVOID_LIMIT = 12
+RECENT_QUESTION_AVOID_LIMIT = 999
 
 # PL: Przełączniki debugowe dla szczegółowych sekcji logów.
 # EN: Debug toggles for verbose log sections.
 SHOW_RESULT_QUIZ_JSON = False
-SHOW_VALIDATED_QUIZ_JSON = False
+SHOW_VALIDATED_QUIZ_JSON = True
 SHOW_OUTPUT_FAILURE_DEBUG = True
 
 QUALITY_REJECT_REASONS = {
@@ -230,7 +230,7 @@ def build_recent_question_guardrail(question_texts: list[str]) -> str:
     )
 
     return f"""
-Already accepted recent question stems. Do not repeat them and do not create near-clones of them:
+Already accepted question stems are listed below. Before generating new questions, mentally identify every Python concept, operator, built-in, and language feature already covered. Then generate questions that test only concepts NOT on that list — even if phrased differently, a question on the same concept counts as a duplicate.
 {formatted_questions}
 """
 
