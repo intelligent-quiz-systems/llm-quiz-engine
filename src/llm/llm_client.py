@@ -8,14 +8,12 @@ from llm.quiz_debug_checks import print_quiz_debug_checks
 
 LLM_MODEL = "openai/gpt-oss-120b"
 LLM_TEMPERATURE = 0.7
-DEBUG_LLM = True
+DEBUG_LLM = False
 
-# Przełączniki debugowe dla szczegółowych sekcji logów.
-# Tymczasowo wyłączone, ponieważ zaśmiecały terminal podczas bieżących testów.
-# Zostawione w kodzie, aby można je było łatwo ponownie włączyć w razie potrzeby.
-# Debug log toggles for verbose output sections.
-# Temporarily disabled because they cluttered terminal output during normal testing.
-# Kept in code for quick re-enabling if deeper diagnostics are needed later.
+# PL: Przełączniki debugowe dla szczegółowych sekcji logów.
+# PL: Zostawione w kodzie — włączyć ręcznie gdy potrzebna głębsza diagnostyka.
+# EN: Debug toggles for verbose log sections.
+# EN: Kept in code — enable manually when deeper diagnostics are needed.
 SHOW_RAW_LLM_RESPONSE = False
 SHOW_VERBOSE_LLM_REQUEST_DETAILS = False
 

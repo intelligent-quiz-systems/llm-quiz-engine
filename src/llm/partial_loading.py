@@ -39,23 +39,28 @@ def clear_question_widget_keys() -> None:
         del st.session_state[key]
 
 
-def ensure_partial_generation_defaults() -> None:
-    defaults = {
-        "generation_state": None,
-        "partial_generation_error": None,
-        "partial_generation_in_progress": False,
-        "partial_generation_in_progress_since": 0.0,
-        "partial_generation_halted": False,
-        "partial_generation_next_attempt_at": 0.0,
-        "partial_generation_last_generation_id": None,
-        "partial_generation_worker_id": None,
-        "generation_started_at": None,
-        "generation_finished_at": None,
-        "generation_duration_seconds": None,
-        "generation_average_seconds_per_question": None,
-    }
+# PL: Jedno źródło domyślnych wartości stanu generowania częściowego.
+# PL: Używane zarówno przy inicjalizacji jak i przy pełnym resecie sesji.
+# EN: Single source of truth for partial generation session state defaults.
+# EN: Used both for initialization and for full session reset.
+_PARTIAL_GENERATION_DEFAULTS: dict = {
+    "generation_state": None,
+    "partial_generation_error": None,
+    "partial_generation_in_progress": False,
+    "partial_generation_in_progress_since": 0.0,
+    "partial_generation_halted": False,
+    "partial_generation_next_attempt_at": 0.0,
+    "partial_generation_last_generation_id": None,
+    "partial_generation_worker_id": None,
+    "generation_started_at": None,
+    "generation_finished_at": None,
+    "generation_duration_seconds": None,
+    "generation_average_seconds_per_question": None,
+}
 
-    for key, value in defaults.items():
+
+def ensure_partial_generation_defaults() -> None:
+    for key, value in _PARTIAL_GENERATION_DEFAULTS.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
@@ -65,18 +70,8 @@ def reset_partial_generation_session() -> None:
     if worker_id:
         stop_generation_worker(worker_id)
 
-    st.session_state.generation_state = None
-    st.session_state.partial_generation_error = None
-    st.session_state.partial_generation_in_progress = False
-    st.session_state.partial_generation_in_progress_since = 0.0
-    st.session_state.partial_generation_halted = False
-    st.session_state.partial_generation_next_attempt_at = 0.0
-    st.session_state.partial_generation_last_generation_id = None
-    st.session_state.partial_generation_worker_id = None
-    st.session_state.generation_started_at = None
-    st.session_state.generation_finished_at = None
-    st.session_state.generation_duration_seconds = None
-    st.session_state.generation_average_seconds_per_question = None
+    for key, value in _PARTIAL_GENERATION_DEFAULTS.items():
+        st.session_state[key] = value
 
 
 def attach_quiz_metadata(quiz: dict, config: dict) -> dict:
@@ -427,6 +422,10 @@ def start_partial_quiz_flow(config: dict) -> None:
     st.session_state.partial_generation_in_progress = False
     st.session_state.partial_generation_in_progress_since = 0.0
     st.session_state.partial_generation_halted = bool(partial_result.get("completed"))
+    # PL: halted=True oznacza też zakończenie poprawne — nie tylko błąd.
+    # PL: Nazwa jest myląca, ale zmiana wymaga osobnej decyzji.
+    # EN: halted=True also covers normal completion — not only errors.
+    # EN: The name is misleading, but renaming requires a separate decision.
     st.session_state.partial_generation_next_attempt_at = 0.0
     st.session_state.partial_generation_last_generation_id = generation_id
     st.session_state.partial_generation_worker_id = None

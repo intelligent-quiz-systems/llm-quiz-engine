@@ -6,6 +6,10 @@ import uuid
 from llm.llm2 import build_quiz_from_state, generate_next_quiz_chunk
 
 _WORKERS_LOCK = threading.Lock()
+# PL: Zakończone workery nie są usuwane ze słownika — świadome uproszczenie MVP.
+# PL: Temat ewentualnego cleanupu zostawiamy na później.
+# EN: Finished workers are never removed from this dict — deliberate MVP simplification.
+# EN: Cleanup is left for a later decision.
 _WORKERS: dict[str, dict] = {}
 
 DEBUG_PARTIAL_GENERATION_WORKER = True
@@ -75,6 +79,10 @@ def _worker_loop(worker_id: str) -> None:
                 return
 
             if worker.get("stop_requested"):
+                # PL: Worker sprawdza flagę dopiero po zakończeniu bieżącego wywołania LLM.
+                # PL: Zatrzymanie nie jest natychmiastowe — to normalne zachowanie.
+                # EN: The worker checks this flag only after the current LLM call finishes.
+                # EN: Stop is not immediate — this is expected behavior.
                 _finalize_worker_unlocked(
                     worker,
                     completed=False,
