@@ -50,6 +50,7 @@ OUTPUT_REJECT_REASONS = {
     "json_validate_failed",
     "incomplete_max_output_tokens",
     "incomplete_response",
+    "wrong_question_count",
 }
 
 
