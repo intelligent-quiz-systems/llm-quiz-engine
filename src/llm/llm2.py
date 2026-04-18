@@ -24,7 +24,7 @@ DEFAULT_BATCH_QUESTION_LIMIT = 100
 INITIAL_BATCH_SIZE = 10
 FALLBACK_BATCH_SIZE = 5
 MIN_SAFE_BATCH_SIZE = 3
-MAX_RETRIES_PER_BATCH_SIZE = 2
+MAX_ATTEMPTS_PER_BATCH_SIZE = 2
 MAX_RATE_LIMIT_RETRIES_PER_BATCH_SIZE = 2
 SIMILAR_QUESTION_THRESHOLD = 0.88
 OUTPUT_BATCH_STEP_DOWN = 2
@@ -797,7 +797,7 @@ def _generate_one_accepted_batch(
         # EN: because retrying the same size often wastes time.
         should_retry_same_size = (
             reject_reason in QUALITY_REJECT_REASONS
-            and retry_number_for_this_size < MAX_RETRIES_PER_BATCH_SIZE
+            and retry_number_for_this_size < MAX_ATTEMPTS_PER_BATCH_SIZE
             and not (
                 reject_reason == "duplicate_questions"
                 and attempted_batch_size <= FALLBACK_BATCH_SIZE
