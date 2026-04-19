@@ -24,7 +24,7 @@ HARD_MAX_OUTPUT_TOKENS = 2200
 DEFAULT_BATCH_QUESTION_LIMIT = 100
 INITIAL_BATCH_SIZE = 10
 FALLBACK_BATCH_SIZE = 5
-MIN_SAFE_BATCH_SIZE = 3
+OUTPUT_FALLBACK_MIN = 3  # floor for the output-error fallback path only; reduce path can go down to 1
 MAX_ATTEMPTS_PER_BATCH_SIZE = 2
 MAX_RATE_LIMIT_RETRIES_PER_BATCH_SIZE = 2
 SIMILAR_QUESTION_THRESHOLD = 0.88
@@ -553,6 +553,7 @@ def generate_quiz_batch(
         - options must contain exactly 4 answers
         - correct_index must be an integer from 0 to 3
         - return exactly the requested number of questions
+        - after generating each question, verify that the correct answer actually answers the question asked; pay special attention to dates, proper names, and institution names
     """
 
     user_prompt = f"""
@@ -865,8 +866,8 @@ def _generate_one_accepted_batch(
             attempt_number += 1
             continue
 
-        # PL: Błędy outputowe sterują głównym fallbackiem 10 -> 5 -> 3.
-        # EN: Output errors drive the main fallback path 10 -> 5 -> 3.
+        # PL: Błędy outputowe sterują ścieżką fallback 10 -> 5 -> OUTPUT_FALLBACK_MIN (3). Poniżej tej granicy wchodzi awaryjny reduce (-1 na iterację, aż do 1).
+        # EN: Output errors drive the fallback path 10 -> 5 -> OUTPUT_FALLBACK_MIN (3). Below that floor the reduce path takes over (-1 per iteration, down to 1).
         if reject_reason in OUTPUT_REJECT_REASONS:
             if (
                 attempted_batch_size == primary_batch_size
@@ -893,7 +894,7 @@ def _generate_one_accepted_batch(
                 attempt_number += 1
                 continue
 
-            if attempted_batch_size <= FALLBACK_BATCH_SIZE and attempted_batch_size > MIN_SAFE_BATCH_SIZE:
+            if attempted_batch_size <= FALLBACK_BATCH_SIZE and attempted_batch_size > OUTPUT_FALLBACK_MIN:
                 next_safe_batch_size = normalize_batch_size(
                     attempted_batch_size - OUTPUT_BATCH_STEP_DOWN,
                     remaining_questions,
