@@ -35,6 +35,25 @@ def make_valid_quiz_response(topic="Python"):
     }
 
 
+def make_valid_quiz_response_with_n_questions(n, topic="Python"):
+    return {
+        "quiz_title": topic,
+        "questions": [
+            {
+                "question": f"Pytanie {i + 1}?",
+                "options": [
+                    "Odpowiedź A",
+                    "Odpowiedź B",
+                    "Odpowiedź C",
+                    "Odpowiedź D",
+                ],
+                "correct_index": 0,
+            }
+            for i in range(n)
+        ],
+    }
+
+
 def load_llm2_module(
     fake_run_prompt,
     fake_quiz_class=FakeQuiz,
@@ -212,3 +231,95 @@ def test_generate_quiz_2_passes_user_inputs_to_prompt(topic, difficulty, num_que
     assert f"Topic: {topic}" in user_prompt
     assert f"Difficulty: {difficulty}" in user_prompt
     assert f"- exactly {num_questions} questions" in user_prompt
+
+@pytest.mark.parametrize("num_questions", [1, 5, 15, 20])
+def test_generate_quiz_2_returns_json_with_exact_number_of_questions(num_questions):
+    fake_response = make_valid_quiz_response_with_n_questions(
+        num_questions,
+        topic="Python",
+    )
+    fake_run_prompt = Mock(return_value=fake_response)
+
+    llm2_module = load_llm2_module(
+        fake_run_prompt=fake_run_prompt,
+        module_name=f"tested_llm2_exact_count_{num_questions}",
+    )
+
+    result = llm2_module.generate_quiz_2("Python", "easy", num_questions)
+
+    assert result is not None
+    assert isinstance(result, dict)
+    assert "questions" in result
+    assert isinstance(result["questions"], list)
+    assert len(result["questions"]) == num_questions
+
+
+@pytest.mark.parametrize("num_questions", [1, 5, 15, 20])
+def test_generate_quiz_2_uses_requested_question_count_in_prompt_and_response(
+    num_questions,
+):
+    fake_response = make_valid_quiz_response_with_n_questions(
+        num_questions,
+        topic="Python",
+    )
+    fake_run_prompt = Mock(return_value=fake_response)
+
+    llm2_module = load_llm2_module(
+        fake_run_prompt=fake_run_prompt,
+        module_name=f"tested_llm2_prompt_and_response_count_{num_questions}",
+    )
+
+    result = llm2_module.generate_quiz_2("Python", "easy", num_questions)
+
+    _, user_prompt, _ = fake_run_prompt.call_args.args
+
+    assert f"- exactly {num_questions} questions" in user_prompt
+    assert result is not None
+    assert len(result["questions"]) == num_questions
+
+
+@pytest.mark.parametrize(
+    "requested_count, returned_count",
+    [
+        (1, 2),
+        (5, 4),
+        (15, 14),
+        (20, 19),
+    ],
+)
+def test_generate_quiz_2_returns_none_when_llm_returns_wrong_number_of_questions(
+    requested_count,
+    returned_count,
+):
+    fake_response = make_valid_quiz_response_with_n_questions(
+        returned_count,
+        topic="Python",
+    )
+    fake_run_prompt = Mock(return_value=fake_response)
+
+    class QuizThatValidatesQuestionCount:
+        @staticmethod
+        def model_validate(data):
+            if len(data["questions"]) != requested_count:
+                raise ValidationError.from_exception_data(
+                    "Quiz",
+                    [
+                        {
+                            "type": "value_error",
+                            "loc": ("questions",),
+                            "msg": f"Expected exactly {requested_count} questions",
+                            "input": data["questions"],
+                        }
+                    ],
+                )
+            return data
+
+    llm2_module = load_llm2_module(
+        fake_run_prompt=fake_run_prompt,
+        fake_quiz_class=QuizThatValidatesQuestionCount,
+        module_name=f"tested_llm2_wrong_count_{requested_count}_{returned_count}",
+    )
+
+    result = llm2_module.generate_quiz_2("Python", "easy", requested_count)
+
+    assert result is None
