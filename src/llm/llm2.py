@@ -38,7 +38,7 @@ RECENT_QUESTION_AVOID_LIMIT = 999
 # PL: Przełączniki debugowe dla szczegółowych sekcji logów.
 # EN: Debug toggles for verbose log sections.
 SHOW_RESULT_QUIZ_JSON = False
-SHOW_VALIDATED_QUIZ_JSON = True
+SHOW_VALIDATED_QUIZ_JSON = False
 SHOW_OUTPUT_FAILURE_DEBUG = True
 
 QUALITY_REJECT_REASONS = {
