@@ -1,5 +1,6 @@
 import json
 import streamlit as st
+import time
 
 from screens.screens import (
     init_state,
@@ -60,6 +61,8 @@ if st.session_state.app_step == "config":
         st.session_state.quiz_deadline = None
         st.session_state.answers = {}
         st.session_state.timeout_happened = False
+        st.session_state.quiz_started_at = time.time()
+        st.session_state.history_saved = False
 
         keys_to_remove = [k for k in st.session_state.keys() if k.startswith("widget_q_")]
         for key in keys_to_remove:
