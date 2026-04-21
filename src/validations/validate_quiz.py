@@ -30,8 +30,8 @@ def validate_quiz(quiz):
         if not isinstance(question["question"], str) or not question["question"].strip():
             return False, f"Pytanie {i}: 'question' musi być niepustym tekstem."
 
-        if not isinstance(question["options"], list) or len(question["options"]) < 2:
-            return False, f"Pytanie {i}: 'options' musi być listą co najmniej 2 odpowiedzi."
+        if not isinstance(question["options"], list) or len(question["options"]) != 4:
+            return False, f"Pytanie {i}: 'options' musi być listą dokładnie 4 odpowiedzi."
 
         if not all(isinstance(opt, str) and opt.strip() for opt in question["options"]):
             return False, f"Pytanie {i}: wszystkie odpowiedzi muszą być niepustym tekstem."

@@ -52,6 +52,7 @@ OUTPUT_REJECT_REASONS = {
     "incomplete_max_output_tokens",
     "incomplete_response",
     "wrong_question_count",
+    "validation_error",
 }
 
 

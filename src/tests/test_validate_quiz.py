@@ -157,7 +157,7 @@ def test_validate_quiz_rejects_options_that_are_not_list():
     is_valid, error_message = validate_quiz(quiz)
 
     assert is_valid is False
-    assert error_message == "Pytanie 1: 'options' musi być listą co najmniej 2 odpowiedzi."
+    assert error_message == "Pytanie 1: 'options' musi być listą dokładnie 4 odpowiedzi."
 
 
 def test_validate_quiz_rejects_too_few_options():
@@ -175,7 +175,7 @@ def test_validate_quiz_rejects_too_few_options():
     is_valid, error_message = validate_quiz(quiz)
 
     assert is_valid is False
-    assert error_message == "Pytanie 1: 'options' musi być listą co najmniej 2 odpowiedzi."
+    assert error_message == "Pytanie 1: 'options' musi być listą dokładnie 4 odpowiedzi."
 
 
 def test_validate_quiz_rejects_non_text_options():
@@ -202,7 +202,7 @@ def test_validate_quiz_rejects_non_integer_correct_index():
         "questions": [
             {
                 "question": "Która odpowiedź jest poprawna?",
-                "options": ["A", "B", "C"],
+                "options": ["A", "B", "C", "D"],
                 "correct_index": "0",
             }
         ],
@@ -220,7 +220,7 @@ def test_validate_quiz_rejects_negative_correct_index():
         "questions": [
             {
                 "question": "Która odpowiedź jest poprawna?",
-                "options": ["A", "B", "C"],
+                "options": ["A", "B", "C", "D"],
                 "correct_index": -1,
             }
         ],
@@ -238,8 +238,8 @@ def test_validate_quiz_rejects_correct_index_out_of_range():
         "questions": [
             {
                 "question": "Która odpowiedź jest poprawna?",
-                "options": ["A", "B", "C"],
-                "correct_index": 3,
+                "options": ["A", "B", "C", "D"],
+                "correct_index": 4,
             }
         ],
     }
