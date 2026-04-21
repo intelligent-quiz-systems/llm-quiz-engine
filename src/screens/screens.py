@@ -446,7 +446,12 @@ def render_sidebar_status(quiz, config):
 
 
 def render_quiz_screen(quiz, config):
-    should_autorefresh = (
+    has_active_timer = (
+        st.session_state.get("quiz_deadline") is not None
+        and remaining_time() > 0
+    )
+
+    should_autorefresh = has_active_timer or (
         not is_quiz_fully_loaded(quiz, config)
         and not st.session_state.get("partial_generation_halted", False)
         and not st.session_state.get("partial_generation_error")
