@@ -10,8 +10,6 @@ from screens.screens import (
     DEFAULT_JSON,
 )
 
-# alternative LLM communication implementations
-from llm.llm import generate_quiz
 from llm.llm2 import generate_quiz_2
 
 from validations.validate_quiz import validate_quiz
