@@ -6,6 +6,9 @@ import streamlit as st
 import streamlit.components.v1 as components
 from streamlit_autorefresh import st_autorefresh
 from validations.validate_quiz import validate_quiz
+from datetime import datetime, timezone
+from uuid import uuid4 
+from history.history import append_attempt, load_history
 
 QUIZ_PAGE_SIZE = 3
 OPTION_LABELS = ["A", "B", "C", "D", "E", "F"]
@@ -91,6 +94,8 @@ def init_state():
         "answers": {},
         "timeout_happened": False,
         "config": None,
+        "quiz_started_at": None,
+        "history_saved": False
     }
 
     for key, value in defaults.items():
@@ -295,6 +300,7 @@ def render_config_screen():
     submitted = st.button("Generuj quiz", type="primary")
 
     inject_browser_scroll_on_nav()
+    render_history_preview()
 
     return {
         "submitted": submitted,
@@ -347,6 +353,9 @@ def reset_quiz_state():
     st.session_state.answers = {}
     st.session_state.current_page = 0
     st.session_state.timeout_happened = False
+    st.session_state.quiz_started_at = None
+    st.session_state.history_saved = False
+
 
     keys_to_remove = [k for k in st.session_state.keys() if k.startswith("widget_q_")]
     for key in keys_to_remove:
@@ -467,6 +476,27 @@ def calculate_score(quiz):
 
     return score
 
+def build_history_entry(quiz, config, score):
+    total = len(quiz.get("questions", []))
+    answered = count_answered_questions(quiz)
+    started_at = st.session_state.quiz_started_at or time.time()
+    finished_at = time.time()
+    duration_seconds = max(0, int(finished_at - started_at))
+
+    return {
+        "attempt_id": str(uuid4()),
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "topic": quiz.get("topic") or quiz.get("quiz_title", "Quiz"),
+        "difficulty": difficulty_label(config.get("difficulty")),
+        "question_count": total,
+        "answered_count": answered,
+        "score": score,
+        "max_score": total,
+        "percent": round((score / total) * 100, 2) if total > 0 else 0.0,
+        "time_limit_minutes": config.get("time_limit", DEFAULT_TIME_LIMIT_MINUTES),
+        "duration_seconds": duration_seconds,
+        "timed_out": bool(st.session_state.timeout_happened),
+    }
 
 def render_results_screen(quiz, config):
     is_valid, error_message = validate_quiz(quiz)
@@ -478,6 +508,10 @@ def render_results_screen(quiz, config):
 
     score = calculate_score(quiz)
     total = len(quiz["questions"])
+
+    if not st.session_state.history_saved:
+        append_attempt(build_history_entry(quiz, config, score))
+        st.session_state.history_saved = True 
 
     with st.sidebar:
         st.header("Wyniki")
@@ -555,3 +589,18 @@ def render_results_screen(quiz, config):
             st.rerun()
 
     inject_browser_scroll_on_nav()
+
+def render_history_preview():
+    history = load_history()
+
+    if not history:
+        return
+
+    st.subheader("Ostatnie wyniki")
+
+    for entry in history[:5]:
+        st.write(
+            f"{entry['topic']} | {entry['score']}/{entry['max_score']} "
+            f"({entry['percent']}%) | {entry['difficulty']} | "
+            f"{entry['finished_at'][:19].replace('T', ' ')}"
+        )
