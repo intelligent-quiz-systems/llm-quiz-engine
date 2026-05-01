@@ -8,13 +8,20 @@ import pytest
 from pydantic import ValidationError
 
 
-LLM2_FILE = Path(__file__).resolve().parents[1] / "llm" / "llm2.py"
+LLM_FILE = Path(__file__).resolve().parents[1] / "llm" / "llm.py"
 
 
 class FakeQuiz:
     @staticmethod
     def model_validate(data):
         return data
+
+
+class FakeTopicFromText:
+    @staticmethod
+    def model_validate(data):
+        topic = data.get("topic", "") if isinstance(data, dict) else ""
+        return type("TopicResult", (), {"topic": topic})()
 
 
 def make_valid_quiz_response(topic="Python"):
@@ -54,10 +61,10 @@ def make_valid_quiz_response_with_n_questions(n, topic="Python"):
     }
 
 
-def load_llm2_module(
+def load_llm_module(
     fake_run_prompt,
     fake_quiz_class=FakeQuiz,
-    module_name="tested_llm2_module",
+    module_name="tested_llm_module",
 ):
     fake_llm_package = ModuleType("llm")
     fake_llm_client_module = ModuleType("llm.llm_client")
@@ -65,12 +72,13 @@ def load_llm2_module(
 
     fake_llm_client_module.run_prompt = fake_run_prompt
     fake_quiz_model_module.Quiz = fake_quiz_class
+    fake_quiz_model_module.TopicFromText = FakeTopicFromText
 
     sys.modules["llm"] = fake_llm_package
     sys.modules["llm.llm_client"] = fake_llm_client_module
     sys.modules["llm.quiz_model"] = fake_quiz_model_module
 
-    spec = spec_from_file_location(module_name, LLM2_FILE)
+    spec = spec_from_file_location(module_name, LLM_FILE)
     assert spec is not None and spec.loader is not None
 
     module = module_from_spec(spec)
@@ -79,16 +87,16 @@ def load_llm2_module(
     return module
 
 
-def test_generate_quiz_2_returns_quiz_json_on_success():
+def test_generate_quiz_returns_quiz_json_on_success():
     fake_response = make_valid_quiz_response("Python")
     fake_run_prompt = Mock(return_value=fake_response)
 
-    llm2_module = load_llm2_module(
+    llm_module = load_llm_module(
         fake_run_prompt=fake_run_prompt,
-        module_name="tested_llm2_success",
+        module_name="tested_llm_success",
     )
 
-    result = llm2_module.generate_quiz_2("Python", "easy", 1)
+    result = llm_module.generate_quiz("Python", "easy", 1)
 
     assert isinstance(result, dict)
     assert result == fake_response
@@ -112,7 +120,7 @@ def test_generate_quiz_2_returns_quiz_json_on_success():
     assert response_model is FakeQuiz
 
 
-def test_generate_quiz_2_validates_response_with_quiz_model():
+def test_generate_quiz_validates_response_with_quiz_model():
     fake_response = make_valid_quiz_response("Python")
     fake_run_prompt = Mock(return_value=fake_response)
 
@@ -124,19 +132,19 @@ def test_generate_quiz_2_validates_response_with_quiz_model():
             TrackingQuiz.called_with = data
             return data
 
-    llm2_module = load_llm2_module(
+    llm_module = load_llm_module(
         fake_run_prompt=fake_run_prompt,
         fake_quiz_class=TrackingQuiz,
-        module_name="tested_llm2_validation_called",
+        module_name="tested_llm_validation_called",
     )
 
-    result = llm2_module.generate_quiz_2("Python", "easy", 1)
+    result = llm_module.generate_quiz("Python", "easy", 1)
 
     assert result == fake_response
     assert TrackingQuiz.called_with == fake_response
 
 
-def test_generate_quiz_2_returns_none_on_validation_error():
+def test_generate_quiz_returns_none_on_validation_error():
     fake_run_prompt = Mock(return_value={"invalid": "data"})
 
     class QuizThatRaisesValidationError:
@@ -154,31 +162,31 @@ def test_generate_quiz_2_returns_none_on_validation_error():
                 ],
             )
 
-    llm2_module = load_llm2_module(
+    llm_module = load_llm_module(
         fake_run_prompt=fake_run_prompt,
         fake_quiz_class=QuizThatRaisesValidationError,
-        module_name="tested_llm2_validation_error",
+        module_name="tested_llm_validation_error",
     )
 
-    result = llm2_module.generate_quiz_2("Python", "medium", 3)
+    result = llm_module.generate_quiz("Python", "medium", 3)
 
     assert result is None
 
 
-def test_generate_quiz_2_returns_none_on_llm_error():
+def test_generate_quiz_returns_none_on_llm_error():
     fake_run_prompt = Mock(side_effect=RuntimeError("API error"))
 
-    llm2_module = load_llm2_module(
+    llm_module = load_llm_module(
         fake_run_prompt=fake_run_prompt,
-        module_name="tested_llm2_runtime_error",
+        module_name="tested_llm_runtime_error",
     )
 
-    result = llm2_module.generate_quiz_2("Docker", "hard", 2)
+    result = llm_module.generate_quiz("Docker", "hard", 2)
 
     assert result is None
 
 
-def test_generate_quiz_2_returns_none_when_run_prompt_returns_none():
+def test_generate_quiz_returns_none_when_run_prompt_returns_none():
     fake_run_prompt = Mock(return_value=None)
 
     class QuizThatRaisesValidationError:
@@ -196,13 +204,13 @@ def test_generate_quiz_2_returns_none_when_run_prompt_returns_none():
                 ],
             )
 
-    llm2_module = load_llm2_module(
+    llm_module = load_llm_module(
         fake_run_prompt=fake_run_prompt,
         fake_quiz_class=QuizThatRaisesValidationError,
-        module_name="tested_llm2_none_response",
+        module_name="tested_llm_none_response",
     )
 
-    result = llm2_module.generate_quiz_2("Python", "easy", 1)
+    result = llm_module.generate_quiz("Python", "easy", 1)
 
     assert result is None
 
@@ -215,16 +223,16 @@ def test_generate_quiz_2_returns_none_when_run_prompt_returns_none():
         ("SQL", "hard", 5),
     ],
 )
-def test_generate_quiz_2_passes_user_inputs_to_prompt(topic, difficulty, num_questions):
+def test_generate_quiz_passes_user_inputs_to_prompt(topic, difficulty, num_questions):
     fake_response = make_valid_quiz_response(topic)
     fake_run_prompt = Mock(return_value=fake_response)
 
-    llm2_module = load_llm2_module(
+    llm_module = load_llm_module(
         fake_run_prompt=fake_run_prompt,
-        module_name=f"tested_llm2_prompt_{topic}_{difficulty}_{num_questions}",
+        module_name=f"tested_llm_prompt_{topic}_{difficulty}_{num_questions}",
     )
 
-    llm2_module.generate_quiz_2(topic, difficulty, num_questions)
+    llm_module.generate_quiz(topic, difficulty, num_questions)
 
     _, user_prompt, _ = fake_run_prompt.call_args.args
 
@@ -232,20 +240,21 @@ def test_generate_quiz_2_passes_user_inputs_to_prompt(topic, difficulty, num_que
     assert f"Difficulty: {difficulty}" in user_prompt
     assert f"- exactly {num_questions} questions" in user_prompt
 
+
 @pytest.mark.parametrize("num_questions", [1, 5, 15, 20])
-def test_generate_quiz_2_returns_json_with_exact_number_of_questions(num_questions):
+def test_generate_quiz_returns_json_with_exact_number_of_questions(num_questions):
     fake_response = make_valid_quiz_response_with_n_questions(
         num_questions,
         topic="Python",
     )
     fake_run_prompt = Mock(return_value=fake_response)
 
-    llm2_module = load_llm2_module(
+    llm_module = load_llm_module(
         fake_run_prompt=fake_run_prompt,
-        module_name=f"tested_llm2_exact_count_{num_questions}",
+        module_name=f"tested_llm_exact_count_{num_questions}",
     )
 
-    result = llm2_module.generate_quiz_2("Python", "easy", num_questions)
+    result = llm_module.generate_quiz("Python", "easy", num_questions)
 
     assert result is not None
     assert isinstance(result, dict)
@@ -255,7 +264,7 @@ def test_generate_quiz_2_returns_json_with_exact_number_of_questions(num_questio
 
 
 @pytest.mark.parametrize("num_questions", [1, 5, 15, 20])
-def test_generate_quiz_2_uses_requested_question_count_in_prompt_and_response(
+def test_generate_quiz_uses_requested_question_count_in_prompt_and_response(
     num_questions,
 ):
     fake_response = make_valid_quiz_response_with_n_questions(
@@ -264,15 +273,48 @@ def test_generate_quiz_2_uses_requested_question_count_in_prompt_and_response(
     )
     fake_run_prompt = Mock(return_value=fake_response)
 
-    llm2_module = load_llm2_module(
+    llm_module = load_llm_module(
         fake_run_prompt=fake_run_prompt,
-        module_name=f"tested_llm2_prompt_and_response_count_{num_questions}",
+        module_name=f"tested_llm_prompt_and_response_count_{num_questions}",
     )
 
-    result = llm2_module.generate_quiz_2("Python", "easy", num_questions)
+    result = llm_module.generate_quiz("Python", "easy", num_questions)
 
     _, user_prompt, _ = fake_run_prompt.call_args.args
 
     assert f"- exactly {num_questions} questions" in user_prompt
     assert result is not None
     assert len(result["questions"]) == num_questions
+
+
+def test_generate_quiz_includes_source_text_in_prompt():
+    fake_response = make_valid_quiz_response("Python")
+    fake_run_prompt = Mock(return_value=fake_response)
+
+    llm_module = load_llm_module(
+        fake_run_prompt=fake_run_prompt,
+        module_name="tested_llm_source_text_prompt",
+    )
+
+    source_text = "To jest tekst z pliku o języku Python."
+    llm_module.generate_quiz("Python", "easy", 1, source_text=source_text)
+
+    _, user_prompt, _ = fake_run_prompt.call_args.args
+    assert "Source context text:" in user_prompt
+    assert source_text in user_prompt
+    assert "if source context text is provided: base ALL questions strictly on source context text" in user_prompt
+
+
+def test_extract_topic_from_text_returns_topic():
+    fake_run_prompt = Mock(return_value={"topic": "Programowanie w Pythonie"})
+
+    llm_module = load_llm_module(
+        fake_run_prompt=fake_run_prompt,
+        module_name="tested_llm_extract_topic_ok",
+    )
+
+    topic = llm_module.extract_topic_from_text("Python to język programowania.")
+
+    assert topic == "Programowanie w Pythonie"
+
+
