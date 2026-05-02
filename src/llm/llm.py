@@ -11,7 +11,7 @@ if str(SRC_DIR) not in sys.path:
 from llm.llm_client import run_prompt
 from llm.quiz_model import Quiz, TopicFromText
 
-TOPIC_EXTRACTION_CHARS = 1000
+TOPIC_EXTRACTION_CHARS = 2000
 QUIZ_SOURCE_CONTEXT_CHARS = 10000
 
 

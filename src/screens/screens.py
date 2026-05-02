@@ -18,6 +18,7 @@ DEFAULT_TOPIC = "Podstawy Pythona"
 MAX_QUESTION_COUNT = 10
 MAX_TIME_LIMIT_MINUTES = 60
 MAX_SOURCE_FILE_SIZE_BYTES = 10 * 1024 * 1024
+MIN_EXTRACTED_SOURCE_CHARS = 500
 
 
 def format_size_label(size_bytes: int) -> str:
