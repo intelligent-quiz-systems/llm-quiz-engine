@@ -9,3 +9,7 @@ class Question(BaseModel):
 class Quiz(BaseModel):
     quiz_title: str = Field(..., min_length=1)
     questions: list[Question]
+
+
+class TopicFromText(BaseModel):
+    topic: str

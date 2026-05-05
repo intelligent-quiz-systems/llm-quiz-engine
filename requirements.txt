@@ -1,7 +1,8 @@
 groq>=0.6.0
-streamlit>=1.55.0
+streamlit>=1.56.0
 streamlit-autorefresh>= 1.0.1
 python-dotenv
 openai>=2.28.0
 pydantic>=2.12.5
 pytest>=8.3.0
+pypdf>=4.2.0
