@@ -10,13 +10,10 @@ if str(SRC_DIR) not in sys.path:
 
 from llm.llm_client import run_prompt
 from llm.quiz_model import Quiz, TopicFromText
+from llm.generation_config import TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS
 
 # Import Prompt Managera
 from prompt_manager.manager import PromptManager
-
-
-TOPIC_EXTRACTION_CHARS = 2000
-QUIZ_SOURCE_CONTEXT_CHARS = 10000
 
 
 def extract_topic_from_text(source_text: str) -> str | None:

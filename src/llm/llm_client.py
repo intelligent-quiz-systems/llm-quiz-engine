@@ -3,8 +3,7 @@ from openai import OpenAI
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-LLM_MODEL = "openai/gpt-oss-120b" #"openai/gpt-oss-20b"
-LLM_TEMPERATURE = 0.7
+from llm.generation_config import LLM_MODEL, LLM_TEMPERATURE
 
 load_dotenv()
 
