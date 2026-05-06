@@ -33,13 +33,13 @@ def build_excel(output_path: Path, results: list[dict]) -> None:
     wb = openpyxl.Workbook()
     wb.remove(wb.active)  # remove default blank sheet
 
+    add_pivot_full_sheet(wb, results)
     add_dashboard_sheet(wb, results)
     add_tests_sheet(wb, results)
-    add_schema_sheet(wb, "02_Batch_efficiency",    BATCH_EFFICIENCY_FIELDS,    _SCHEMA_NOTE)
-    add_schema_sheet(wb, "03_Rejections_detail",   REJECTIONS_DETAIL_FIELDS,   _SCHEMA_NOTE)
-    add_schema_sheet(wb, "04_Rejection_categories", REJECTION_CATEGORIES_FIELDS, _SCHEMA_NOTE)
-    add_schema_sheet(wb, "05_Guardrail_stats",     GUARDRAIL_STATS_FIELDS,     _SCHEMA_NOTE)
-    add_pivot_full_sheet(wb, results)
+    add_schema_sheet(wb, "03_Batch_efficiency",    BATCH_EFFICIENCY_FIELDS,    _SCHEMA_NOTE)
+    add_schema_sheet(wb, "04_Rejections_detail",   REJECTIONS_DETAIL_FIELDS,   _SCHEMA_NOTE)
+    add_schema_sheet(wb, "05_Rejection_categories", REJECTION_CATEGORIES_FIELDS, _SCHEMA_NOTE)
+    add_schema_sheet(wb, "06_Guardrail_stats",     GUARDRAIL_STATS_FIELDS,     _SCHEMA_NOTE)
     add_column_dict_sheet(wb)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
