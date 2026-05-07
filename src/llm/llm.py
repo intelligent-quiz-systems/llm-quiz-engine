@@ -10,7 +10,8 @@ if str(SRC_DIR) not in sys.path:
 
 from llm.llm_client import run_prompt
 from llm.quiz_model import Quiz, TopicFromText
-from llm.generation_config import TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS
+from llm.generation_config import TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS, SIMILAR_QUESTION_THRESHOLD
+from llm.question_quality import run_quality_checks, format_quality_log
 
 # Import Prompt Managera
 from prompt_manager.manager import PromptManager
@@ -73,6 +74,13 @@ def generate_quiz(
 
         print("\n===== VALIDATED QUIZ JSON =====")
         print(formatted_quiz_json)
+
+        issues = run_quality_checks(
+            quiz_json.get("questions", []),
+            similar_threshold=SIMILAR_QUESTION_THRESHOLD,
+        )
+        if issues:
+            print(format_quality_log(issues))
 
         return quiz_json
 
