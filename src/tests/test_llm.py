@@ -1,3 +1,12 @@
+"""
+Tests for the llm.py orchestration layer.
+
+generate_quiz() is a thin orchestrator: it creates state, delegates to
+run_batched_generation, validates the result, and logs.  Tests here verify
+the orchestration contracts, not the internals of batch strategy or prompts.
+
+Prompt content and batch behaviour are tested in test_batch_strategy.py.
+"""
 import sys
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -7,9 +16,10 @@ from unittest.mock import Mock
 import pytest
 from pydantic import ValidationError
 
-
 LLM_FILE = Path(__file__).resolve().parents[1] / "llm" / "llm.py"
 
+
+# ── Fake model classes ────────────────────────────────────────────────────────
 
 class FakeQuiz:
     @staticmethod
@@ -24,18 +34,15 @@ class FakeTopicFromText:
         return type("TopicResult", (), {"topic": topic})()
 
 
+# ── Quiz fixtures ─────────────────────────────────────────────────────────────
+
 def make_valid_quiz_response(topic="Python"):
     return {
         "quiz_title": topic,
         "questions": [
             {
                 "question": "Co robi print()?",
-                "options": [
-                    "Wypisuje tekst",
-                    "Usuwa plik",
-                    "Tworzy klasę",
-                    "Kończy program",
-                ],
+                "options": ["Wypisuje tekst", "Usuwa plik", "Tworzy klasę", "Kończy program"],
                 "correct_index": 0,
             }
         ],
@@ -48,12 +55,7 @@ def make_valid_quiz_response_with_n_questions(n, topic="Python"):
         "questions": [
             {
                 "question": f"Pytanie {i + 1}?",
-                "options": [
-                    "Odpowiedź A",
-                    "Odpowiedź B",
-                    "Odpowiedź C",
-                    "Odpowiedź D",
-                ],
+                "options": ["Odpowiedź A", "Odpowiedź B", "Odpowiedź C", "Odpowiedź D"],
                 "correct_index": 0,
             }
             for i in range(n)
@@ -61,260 +63,206 @@ def make_valid_quiz_response_with_n_questions(n, topic="Python"):
     }
 
 
+# ── Module loader ─────────────────────────────────────────────────────────────
+
 def load_llm_module(
-    fake_run_prompt,
+    mock_run_batched,
     fake_quiz_class=FakeQuiz,
-    module_name="tested_llm_module",
+    fake_run_prompt=None,
+    module_name="tested_llm",
 ):
-    fake_llm_package = ModuleType("llm")
-    fake_llm_client_module = ModuleType("llm.llm_client")
-    fake_quiz_model_module = ModuleType("llm.quiz_model")
+    """
+    Load llm.py with all its dependencies mocked.
 
-    fake_llm_client_module.run_prompt = fake_run_prompt
-    fake_quiz_model_module.Quiz = fake_quiz_class
-    fake_quiz_model_module.TopicFromText = FakeTopicFromText
+    mock_run_batched replaces run_batched_generation — the batch layer is fully
+    mocked here because its behaviour is tested in test_batch_strategy.py.
+    """
+    fake_run_prompt = fake_run_prompt or Mock()
 
-    sys.modules["llm"] = fake_llm_package
-    sys.modules["llm.llm_client"] = fake_llm_client_module
-    sys.modules["llm.quiz_model"] = fake_quiz_model_module
+    # Minimal GenerationState dict that format_state_summary can consume
+    def _create_state(topic, difficulty, num_questions, initial_batch_size):
+        return {
+            "topic": topic,
+            "difficulty": difficulty,
+            "requested_questions": num_questions,
+            "accepted_questions": 0,
+            "total_batches": 0,
+            "rejected_attempts": 0,
+            "initial_batch_size": initial_batch_size,
+            "final_locked_batch_size": initial_batch_size,
+            "batch_log": [],
+            "rejection_log": [],
+        }
+
+    # Fake modules
+    pkg_llm       = ModuleType("llm")
+    mod_client    = ModuleType("llm.llm_client")
+    mod_model     = ModuleType("llm.quiz_model")
+    mod_batch     = ModuleType("llm.batch_strategy")
+    mod_state     = ModuleType("llm.generation_state")
+    mod_config    = ModuleType("llm.generation_config")
+    mod_pm_pkg    = ModuleType("prompt_manager")
+    mod_pm        = ModuleType("prompt_manager.manager")
+
+    mod_client.run_prompt                    = fake_run_prompt
+    mod_model.Quiz                           = fake_quiz_class
+    mod_model.TopicFromText                  = FakeTopicFromText
+    mod_batch.run_batched_generation         = mock_run_batched
+    mod_state.create_state                   = Mock(side_effect=_create_state)
+    mod_state.format_state_summary           = Mock(return_value="")
+    mod_config.TOPIC_EXTRACTION_CHARS        = 2000
+    mod_config.QUIZ_SOURCE_CONTEXT_CHARS     = 10000
+    mod_config.INITIAL_BATCH_SIZE            = 10
+    mod_config.FALLBACK_BATCH_SIZE           = 5
+    mod_config.MIN_BATCH_SIZE                = 1
+    mod_config.MAX_ATTEMPTS_PER_BATCH_SIZE   = 2
+
+    # PromptManager used only by extract_topic_from_text
+    fake_pm_instance = Mock()
+    fake_pm_instance.build_from_template.return_value = {
+        "system": "You are a topic extraction assistant.",
+        "user": "Extract the main topic from this text:\n\n{source_text}\n\nReturn ONLY JSON.",
+    }
+    mod_pm.PromptManager = Mock(return_value=fake_pm_instance)
+
+    for key, mod in [
+        ("llm", pkg_llm), ("llm.llm_client", mod_client), ("llm.quiz_model", mod_model),
+        ("llm.batch_strategy", mod_batch), ("llm.generation_state", mod_state),
+        ("llm.generation_config", mod_config),
+        ("prompt_manager", mod_pm_pkg), ("prompt_manager.manager", mod_pm),
+    ]:
+        sys.modules[key] = mod
 
     spec = spec_from_file_location(module_name, LLM_FILE)
     assert spec is not None and spec.loader is not None
-
     module = module_from_spec(spec)
     sys.modules.pop(module_name, None)
     spec.loader.exec_module(module)
     return module
 
 
+# ── generate_quiz — return value contracts ────────────────────────────────────
+
 def test_generate_quiz_returns_quiz_json_on_success():
-    fake_response = make_valid_quiz_response("Python")
-    fake_run_prompt = Mock(return_value=fake_response)
-
-    llm_module = load_llm_module(
-        fake_run_prompt=fake_run_prompt,
-        module_name="tested_llm_success",
-    )
-
-    result = llm_module.generate_quiz("Python", "easy", 1)
-
-    assert isinstance(result, dict)
-    assert result == fake_response
-
-    fake_run_prompt.assert_called_once()
-    assert len(fake_run_prompt.call_args.args) == 3
-
-    system_prompt, user_prompt, response_model = fake_run_prompt.call_args.args
-
-    assert "You are a quiz generator." in system_prompt
-    assert "You must return ONLY valid JSON." in system_prompt
-    assert "options must contain exactly 4 answers" in system_prompt
-    assert "correct_index must be an integer from 0 to 3" in system_prompt
-
-    assert "Generate a quiz in Polish." in user_prompt
-    assert "Topic: Python" in user_prompt
-    assert "Difficulty: easy" in user_prompt
-    assert "- exactly 1 questions" in user_prompt
-    assert "Return ONLY JSON." in user_prompt
-
-    assert response_model is FakeQuiz
+    quiz = make_valid_quiz_response("Python")
+    mock_batch = Mock(return_value=quiz)
+    llm = load_llm_module(mock_batch, module_name="t_success")
+    result = llm.generate_quiz("Python", "easy", 1)
+    assert result == quiz
 
 
-def test_generate_quiz_validates_response_with_quiz_model():
-    fake_response = make_valid_quiz_response("Python")
-    fake_run_prompt = Mock(return_value=fake_response)
+def test_generate_quiz_returns_none_when_batch_returns_none():
+    mock_batch = Mock(return_value=None)
+    llm = load_llm_module(mock_batch, module_name="t_none")
+    assert llm.generate_quiz("Python", "easy", 5) is None
+
+
+def test_generate_quiz_returns_none_on_validation_error():
+    quiz = make_valid_quiz_response("Python")
+    mock_batch = Mock(return_value=quiz)
+
+    class QuizThatFails:
+        @staticmethod
+        def model_validate(data):
+            raise ValidationError.from_exception_data(
+                "Quiz",
+                [{"type": "missing", "loc": ("questions",),
+                  "msg": "Field required", "input": data}],
+            )
+
+    llm = load_llm_module(mock_batch, fake_quiz_class=QuizThatFails,
+                          module_name="t_validation_error")
+    assert llm.generate_quiz("Python", "medium", 3) is None
+
+
+def test_generate_quiz_returns_none_when_batch_raises():
+    mock_batch = Mock(side_effect=RuntimeError("API error"))
+    llm = load_llm_module(mock_batch, module_name="t_batch_raises")
+    assert llm.generate_quiz("Docker", "hard", 2) is None
+
+
+# ── generate_quiz — orchestration delegation ──────────────────────────────────
+
+def test_generate_quiz_calls_run_batched_with_correct_args():
+    quiz = make_valid_quiz_response("Python")
+    mock_batch = Mock(return_value=quiz)
+    llm = load_llm_module(mock_batch, module_name="t_batch_args")
+    llm.generate_quiz("Python", "easy", 5, source_text="some context")
+
+    mock_batch.assert_called_once()
+    args, kwargs = mock_batch.call_args
+    assert args[0] == "Python"
+    assert args[1] == "easy"
+    assert args[2] == 5
+    assert args[3] == "some context"
+
+
+def test_generate_quiz_calls_create_state():
+    quiz = make_valid_quiz_response("Python")
+    mock_batch = Mock(return_value=quiz)
+    llm = load_llm_module(mock_batch, module_name="t_create_state")
+    llm.generate_quiz("Python", "easy", 10)
+    # get the create_state mock from the loaded module's generation_state
+    assert sys.modules["llm.generation_state"].create_state.called
+
+
+def test_generate_quiz_passes_state_to_run_batched():
+    quiz = make_valid_quiz_response("Python")
+    mock_batch = Mock(return_value=quiz)
+    llm = load_llm_module(mock_batch, module_name="t_state_passed")
+    llm.generate_quiz("Python", "easy", 5)
+    _, kwargs = mock_batch.call_args
+    assert "state" in kwargs
+    assert kwargs["state"] is not None
+
+
+def test_generate_quiz_validates_result_with_quiz_model():
+    quiz = make_valid_quiz_response("Python")
+    mock_batch = Mock(return_value=quiz)
 
     class TrackingQuiz:
         called_with = None
-
         @staticmethod
         def model_validate(data):
             TrackingQuiz.called_with = data
             return data
 
-    llm_module = load_llm_module(
-        fake_run_prompt=fake_run_prompt,
-        fake_quiz_class=TrackingQuiz,
-        module_name="tested_llm_validation_called",
-    )
-
-    result = llm_module.generate_quiz("Python", "easy", 1)
-
-    assert result == fake_response
-    assert TrackingQuiz.called_with == fake_response
+    llm = load_llm_module(mock_batch, fake_quiz_class=TrackingQuiz,
+                          module_name="t_validation_called")
+    result = llm.generate_quiz("Python", "easy", 1)
+    assert result == quiz
+    assert TrackingQuiz.called_with == quiz
 
 
-def test_generate_quiz_returns_none_on_validation_error():
-    fake_run_prompt = Mock(return_value={"invalid": "data"})
+# ── generate_quiz — various inputs ───────────────────────────────────────────
 
-    class QuizThatRaisesValidationError:
-        @staticmethod
-        def model_validate(data):
-            raise ValidationError.from_exception_data(
-                "Quiz",
-                [
-                    {
-                        "type": "missing",
-                        "loc": ("questions",),
-                        "msg": "Field required",
-                        "input": data,
-                    }
-                ],
-            )
-
-    llm_module = load_llm_module(
-        fake_run_prompt=fake_run_prompt,
-        fake_quiz_class=QuizThatRaisesValidationError,
-        module_name="tested_llm_validation_error",
-    )
-
-    result = llm_module.generate_quiz("Python", "medium", 3)
-
-    assert result is None
-
-
-def test_generate_quiz_returns_none_on_llm_error():
-    fake_run_prompt = Mock(side_effect=RuntimeError("API error"))
-
-    llm_module = load_llm_module(
-        fake_run_prompt=fake_run_prompt,
-        module_name="tested_llm_runtime_error",
-    )
-
-    result = llm_module.generate_quiz("Docker", "hard", 2)
-
-    assert result is None
-
-
-def test_generate_quiz_returns_none_when_run_prompt_returns_none():
-    fake_run_prompt = Mock(return_value=None)
-
-    class QuizThatRaisesValidationError:
-        @staticmethod
-        def model_validate(data):
-            raise ValidationError.from_exception_data(
-                "Quiz",
-                [
-                    {
-                        "type": "model_type",
-                        "loc": (),
-                        "msg": "Input should be a valid dictionary",
-                        "input": data,
-                    }
-                ],
-            )
-
-    llm_module = load_llm_module(
-        fake_run_prompt=fake_run_prompt,
-        fake_quiz_class=QuizThatRaisesValidationError,
-        module_name="tested_llm_none_response",
-    )
-
-    result = llm_module.generate_quiz("Python", "easy", 1)
-
-    assert result is None
-
-
-@pytest.mark.parametrize(
-    "topic,difficulty,num_questions",
-    [
-        ("Python", "easy", 1),
-        ("Docker", "medium", 3),
-        ("SQL", "hard", 5),
-    ],
-)
-def test_generate_quiz_passes_user_inputs_to_prompt(topic, difficulty, num_questions):
-    fake_response = make_valid_quiz_response(topic)
-    fake_run_prompt = Mock(return_value=fake_response)
-
-    llm_module = load_llm_module(
-        fake_run_prompt=fake_run_prompt,
-        module_name=f"tested_llm_prompt_{topic}_{difficulty}_{num_questions}",
-    )
-
-    llm_module.generate_quiz(topic, difficulty, num_questions)
-
-    _, user_prompt, _ = fake_run_prompt.call_args.args
-
-    assert f"Topic: {topic}" in user_prompt
-    assert f"Difficulty: {difficulty}" in user_prompt
-    assert f"- exactly {num_questions} questions" in user_prompt
-
-
-@pytest.mark.parametrize("num_questions", [1, 5, 15, 20])
-def test_generate_quiz_returns_json_with_exact_number_of_questions(num_questions):
-    fake_response = make_valid_quiz_response_with_n_questions(
-        num_questions,
-        topic="Python",
-    )
-    fake_run_prompt = Mock(return_value=fake_response)
-
-    llm_module = load_llm_module(
-        fake_run_prompt=fake_run_prompt,
-        module_name=f"tested_llm_exact_count_{num_questions}",
-    )
-
-    result = llm_module.generate_quiz("Python", "easy", num_questions)
-
-    assert result is not None
+@pytest.mark.parametrize("topic,difficulty,n", [
+    ("Python", "easy", 1),
+    ("Docker", "medium", 5),
+    ("SQL", "hard", 20),
+])
+def test_generate_quiz_returns_dict_for_various_inputs(topic, difficulty, n):
+    quiz = make_valid_quiz_response_with_n_questions(n, topic)
+    mock_batch = Mock(return_value=quiz)
+    llm = load_llm_module(mock_batch, module_name=f"t_inputs_{topic}_{n}")
+    result = llm.generate_quiz(topic, difficulty, n)
     assert isinstance(result, dict)
-    assert "questions" in result
-    assert isinstance(result["questions"], list)
-    assert len(result["questions"]) == num_questions
+    assert len(result["questions"]) == n
 
 
-@pytest.mark.parametrize("num_questions", [1, 5, 15, 20])
-def test_generate_quiz_uses_requested_question_count_in_prompt_and_response(
-    num_questions,
-):
-    fake_response = make_valid_quiz_response_with_n_questions(
-        num_questions,
-        topic="Python",
-    )
-    fake_run_prompt = Mock(return_value=fake_response)
-
-    llm_module = load_llm_module(
-        fake_run_prompt=fake_run_prompt,
-        module_name=f"tested_llm_prompt_and_response_count_{num_questions}",
-    )
-
-    result = llm_module.generate_quiz("Python", "easy", num_questions)
-
-    _, user_prompt, _ = fake_run_prompt.call_args.args
-
-    assert f"- exactly {num_questions} questions" in user_prompt
-    assert result is not None
-    assert len(result["questions"]) == num_questions
-
-
-def test_generate_quiz_includes_source_text_in_prompt():
-    fake_response = make_valid_quiz_response("Python")
-    fake_run_prompt = Mock(return_value=fake_response)
-
-    llm_module = load_llm_module(
-        fake_run_prompt=fake_run_prompt,
-        module_name="tested_llm_source_text_prompt",
-    )
-
-    source_text = "To jest tekst z pliku o języku Python."
-    llm_module.generate_quiz("Python", "easy", 1, source_text=source_text)
-
-    _, user_prompt, _ = fake_run_prompt.call_args.args
-    assert "Source context text:" in user_prompt
-    assert source_text in user_prompt
-    assert "if source context text is provided: base ALL questions strictly on source context text" in user_prompt
-
+# ── extract_topic_from_text ───────────────────────────────────────────────────
 
 def test_extract_topic_from_text_returns_topic():
     fake_run_prompt = Mock(return_value={"topic": "Programowanie w Pythonie"})
-
-    llm_module = load_llm_module(
-        fake_run_prompt=fake_run_prompt,
-        module_name="tested_llm_extract_topic_ok",
-    )
-
-    topic = llm_module.extract_topic_from_text("Python to język programowania.")
-
+    mock_batch = Mock(return_value=None)
+    llm = load_llm_module(mock_batch, fake_run_prompt=fake_run_prompt,
+                          module_name="t_extract_topic")
+    topic = llm.extract_topic_from_text("Python to język programowania.")
     assert topic == "Programowanie w Pythonie"
 
 
+def test_extract_topic_from_text_returns_none_for_empty_input():
+    mock_batch = Mock(return_value=None)
+    llm = load_llm_module(mock_batch, module_name="t_extract_empty")
+    assert llm.extract_topic_from_text("") is None
+    assert llm.extract_topic_from_text("   ") is None
