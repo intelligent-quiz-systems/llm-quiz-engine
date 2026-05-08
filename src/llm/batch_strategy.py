@@ -76,7 +76,8 @@ def run_batched_generation(
     fallback_batch_size: int = FALLBACK_BATCH_SIZE,
     min_batch_size: int = MIN_BATCH_SIZE,
     max_attempts_per_size: int = MAX_ATTEMPTS_PER_BATCH_SIZE,
-    state=None,   # optional GenerationState — populated when provided
+    state=None,           # optional GenerationState — populated when provided
+    on_partial_ready=None,  # optional PartialReadyCallback — called after each accepted batch
 ) -> dict | None:
     """
     Generate quiz questions in batches with retry/fallback.
@@ -143,6 +144,10 @@ def run_batched_generation(
                 batch_attempt_count = 0
                 attempts_at_size = 0
                 print(f"[batch] accepted {len(questions)}q — total {len(accumulated)}/{num_questions}")
+                if on_partial_ready is not None and state is not None:
+                    from llm.partial_loading import build_partial_result, should_return_partial
+                    if should_return_partial(state):
+                        on_partial_ready(build_partial_result(accumulated, quiz_title, state))
                 continue
 
         except Exception as exc:
