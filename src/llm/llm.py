@@ -11,6 +11,7 @@ if str(SRC_DIR) not in sys.path:
 from llm.llm_client import run_prompt
 from llm.quiz_model import Quiz, TopicFromText
 from llm.generation_config import TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS
+from llm.answer_shuffle import shuffle_quiz_options
 
 # Import Prompt Managera
 from prompt_manager.manager import PromptManager
@@ -68,6 +69,7 @@ def generate_quiz(
         print(quiz_json)
 
         quiz = Quiz.model_validate(quiz_json)
+        quiz_json = shuffle_quiz_options(quiz_json)
 
         formatted_quiz_json = json.dumps(quiz_json, indent=2, ensure_ascii=False)
 
