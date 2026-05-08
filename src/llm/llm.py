@@ -10,7 +10,11 @@ if str(SRC_DIR) not in sys.path:
 
 from llm.llm_client import run_prompt
 from llm.quiz_model import Quiz, TopicFromText
-from llm.generation_config import TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS
+from llm.generation_config import (
+    TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS,
+    INITIAL_BATCH_SIZE, FALLBACK_BATCH_SIZE, MIN_BATCH_SIZE, MAX_ATTEMPTS_PER_BATCH_SIZE,
+)
+from llm.batch_strategy import run_batched_generation
 
 # Import Prompt Managera
 from prompt_manager.manager import PromptManager
@@ -44,45 +48,32 @@ def generate_quiz(
     topic: str,
     difficulty: str,
     num_questions: int,
-    source_text: str | None = None
-) -> str | None:
-    
-    manager = PromptManager()
+    source_text: str | None = None,
+) -> dict | None:
 
-    built = manager.build_from_template(
-        prompt_name="quiz_generation",
-        topic=topic,
-        difficulty=difficulty,
-        num_questions=num_questions,
-        source_text=source_text[:QUIZ_SOURCE_CONTEXT_CHARS] if source_text else "No source text provided."
+    quiz_json = run_batched_generation(
+        topic, difficulty, num_questions, source_text,
+        initial_batch_size=INITIAL_BATCH_SIZE,
+        fallback_batch_size=FALLBACK_BATCH_SIZE,
+        min_batch_size=MIN_BATCH_SIZE,
+        max_attempts_per_size=MAX_ATTEMPTS_PER_BATCH_SIZE,
     )
 
-    if not built:
-        print("Błąd: nie udało się pobrać promptu quiz_generation")
+    if quiz_json is None:
+        print("Quiz generation failed after all attempts.")
         return None
 
     try:
-        quiz_json = run_prompt(built["system"], built["user"], Quiz)
-
-        print("\n===== RESULT QUIZ JSON =====")
-        print(quiz_json)
-
-        quiz = Quiz.model_validate(quiz_json)
-
-        formatted_quiz_json = json.dumps(quiz_json, indent=2, ensure_ascii=False)
-
-        print("\n===== VALIDATED QUIZ JSON =====")
-        print(formatted_quiz_json)
-
-        return quiz_json
-
+        Quiz.model_validate(quiz_json)
     except ValidationError as e:
         print("Validation error:", e)
         return None
 
-    except Exception as e:
-        print("LLM error:", e)
-        return None
+    formatted_quiz_json = json.dumps(quiz_json, indent=2, ensure_ascii=False)
+    print("\n===== VALIDATED QUIZ JSON =====")
+    print(formatted_quiz_json)
+
+    return quiz_json
 
 
 if __name__ == "__main__":
