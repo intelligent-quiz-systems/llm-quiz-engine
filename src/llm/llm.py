@@ -15,6 +15,7 @@ from llm.generation_config import (
     INITIAL_BATCH_SIZE, FALLBACK_BATCH_SIZE, MIN_BATCH_SIZE, MAX_ATTEMPTS_PER_BATCH_SIZE,
 )
 from llm.batch_strategy import run_batched_generation
+from llm.generation_state import create_state, format_state_summary
 
 # Import Prompt Managera
 from prompt_manager.manager import PromptManager
@@ -51,16 +52,20 @@ def generate_quiz(
     source_text: str | None = None,
 ) -> dict | None:
 
+    state = create_state(topic, difficulty, num_questions, INITIAL_BATCH_SIZE)
+
     quiz_json = run_batched_generation(
         topic, difficulty, num_questions, source_text,
         initial_batch_size=INITIAL_BATCH_SIZE,
         fallback_batch_size=FALLBACK_BATCH_SIZE,
         min_batch_size=MIN_BATCH_SIZE,
         max_attempts_per_size=MAX_ATTEMPTS_PER_BATCH_SIZE,
+        state=state,
     )
 
+    print(format_state_summary(state))
+
     if quiz_json is None:
-        print("Quiz generation failed after all attempts.")
         return None
 
     try:

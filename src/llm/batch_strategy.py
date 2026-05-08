@@ -76,6 +76,7 @@ def run_batched_generation(
     fallback_batch_size: int = FALLBACK_BATCH_SIZE,
     min_batch_size: int = MIN_BATCH_SIZE,
     max_attempts_per_size: int = MAX_ATTEMPTS_PER_BATCH_SIZE,
+    state=None,   # optional GenerationState — populated when provided
 ) -> dict | None:
     """
     Generate quiz questions in batches with retry/fallback.
@@ -90,11 +91,16 @@ def run_batched_generation(
     from prompt_manager.manager import PromptManager
     from llm.generation_config import QUIZ_SOURCE_CONTEXT_CHARS
 
+    if state is not None:
+        from llm.generation_state import record_accepted_batch, record_rejection
+
     manager = PromptManager()
     accumulated: list[dict] = []
     quiz_title: str | None = None
     locked_size = initial_batch_size
     attempts_at_size = 0
+    current_batch = 1          # batch number for state tracking (1-based)
+    batch_attempt_count = 0    # attempts on the current (in-progress) batch
     # Safety cap: avoids infinite loops in degenerate configs
     total_cap = (num_questions // max(min_batch_size, 1) + 2) * max_attempts_per_size * 3
     total_attempts = 0
@@ -103,6 +109,7 @@ def run_batched_generation(
         remaining = num_questions - len(accumulated)
         batch_size = min(locked_size, remaining)
         total_attempts += 1
+        batch_attempt_count += 1
         decision: Decision = "halt"
 
         try:
@@ -129,7 +136,11 @@ def run_batched_generation(
             else:
                 if quiz_title is None:
                     quiz_title = result.get("quiz_title", f"Quiz: {topic}")
+                if state is not None:
+                    record_accepted_batch(state, current_batch, batch_size, len(questions), batch_attempt_count)
                 accumulated.extend(questions)
+                current_batch += 1
+                batch_attempt_count = 0
                 attempts_at_size = 0
                 print(f"[batch] accepted {len(questions)}q — total {len(accumulated)}/{num_questions}")
                 continue
@@ -137,6 +148,8 @@ def run_batched_generation(
         except Exception as exc:
             decision = classify_exception(exc)
             print(f"[batch] {type(exc).__name__} → {decision}")
+            if state is not None:
+                record_rejection(state, current_batch, batch_attempt_count, batch_size, decision, type(exc).__name__)
 
         # Handle non-accept outcomes
         attempts_at_size += 1
@@ -152,6 +165,9 @@ def run_batched_generation(
                 print("[batch] already at minimum batch size — halting")
                 break
         # else: "retry" → loop continues with same locked_size
+
+    if state is not None:
+        state["final_locked_batch_size"] = locked_size
 
     if not accumulated:
         return None
