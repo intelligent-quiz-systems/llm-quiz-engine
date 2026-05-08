@@ -1,0 +1,152 @@
+"""
+Background generation worker for quiz partial loading.
+
+Runs quiz generation in a background thread. Partial results become
+available as batches complete via the on_partial_ready callback from
+batch_strategy.run_batched_generation().
+
+Usage:
+    worker = BackgroundGenerationWorker("Python", "easy", 20)
+    worker.start()
+
+    # In a UI polling loop:
+    snapshot = worker.get_snapshot()
+    if snapshot.partial_result:
+        display(snapshot.partial_result.questions)
+    if snapshot.is_done:
+        finalise(snapshot.partial_result)
+"""
+from __future__ import annotations
+import threading
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from llm.partial_loading import PartialResult
+
+# Worker lifecycle — separate from generation status values in partial_loading
+WORKER_IDLE    = "idle"
+WORKER_RUNNING = "running"
+WORKER_DONE    = "done"
+
+
+@dataclass
+class WorkerSnapshot:
+    """Immutable, thread-safe snapshot of worker state at a point in time."""
+    worker_status: str               # WORKER_IDLE / WORKER_RUNNING / WORKER_DONE
+    partial_result: PartialResult | None  # latest result, or None if none yet
+    is_done: bool                    # True when thread has exited
+    error: str | None                # set if the worker thread raised an exception
+
+
+class BackgroundGenerationWorker:
+    """
+    Runs run_batched_generation in a background thread.
+
+    Thread communication:
+    - _on_partial_ready() is called by the batch runner after each accepted batch.
+    - get_snapshot() reads the latest result under a lock.
+
+    _run_function is an injection point for testing: it receives the
+    on_partial_ready callback and calls it as results arrive, without
+    requiring a live API.
+    """
+
+    def __init__(
+        self,
+        topic: str,
+        difficulty: str,
+        num_questions: int,
+        source_text: str | None = None,
+        _run_function: Callable | None = None,
+    ) -> None:
+        self._topic          = topic
+        self._difficulty     = difficulty
+        self._num_questions  = num_questions
+        self._source_text    = source_text
+        self._run_function   = _run_function   # None → real generation
+
+        self._lock           = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._worker_status  = WORKER_IDLE
+        self._latest_partial = None
+        self._error: str | None = None
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def start(self) -> None:
+        """Launch background generation. Non-blocking — returns immediately."""
+        with self._lock:
+            if self._worker_status != WORKER_IDLE:
+                return
+            self._worker_status = WORKER_RUNNING
+
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def get_snapshot(self) -> WorkerSnapshot:
+        """Return a thread-safe immutable snapshot of the current state."""
+        with self._lock:
+            return WorkerSnapshot(
+                worker_status=self._worker_status,
+                partial_result=self._latest_partial,
+                is_done=(self._worker_status == WORKER_DONE),
+                error=self._error,
+            )
+
+    def is_done(self) -> bool:
+        """Return True when the background thread has exited."""
+        with self._lock:
+            return self._worker_status == WORKER_DONE
+
+    # ── Internal ──────────────────────────────────────────────────────────────
+
+    def _on_partial_ready(self, partial_result) -> None:
+        """Called by the batch runner on each accepted batch."""
+        with self._lock:
+            self._latest_partial = partial_result
+
+    def _run(self) -> None:
+        """Background thread entry point."""
+        try:
+            if self._run_function is not None:
+                self._run_function(self._on_partial_ready)
+            else:
+                self._real_run()
+        except Exception as exc:
+            with self._lock:
+                self._error = str(exc)
+        finally:
+            with self._lock:
+                self._worker_status = WORKER_DONE
+
+    def _real_run(self) -> None:
+        """Actual generation path. All imports deferred to avoid env-var errors at load time."""
+        from llm.batch_strategy import run_batched_generation
+        from llm.generation_state import create_state
+        from llm.generation_config import (
+            INITIAL_BATCH_SIZE, FALLBACK_BATCH_SIZE,
+            MIN_BATCH_SIZE, MAX_ATTEMPTS_PER_BATCH_SIZE,
+        )
+        from llm.partial_loading import build_final_result
+
+        state = create_state(
+            self._topic, self._difficulty, self._num_questions, INITIAL_BATCH_SIZE
+        )
+
+        quiz_json = run_batched_generation(
+            self._topic, self._difficulty, self._num_questions, self._source_text,
+            initial_batch_size=INITIAL_BATCH_SIZE,
+            fallback_batch_size=FALLBACK_BATCH_SIZE,
+            min_batch_size=MIN_BATCH_SIZE,
+            max_attempts_per_size=MAX_ATTEMPTS_PER_BATCH_SIZE,
+            state=state,
+            on_partial_ready=self._on_partial_ready,
+        )
+
+        questions  = quiz_json.get("questions", []) if quiz_json else []
+        quiz_title = quiz_json.get("quiz_title")    if quiz_json else None
+        final = build_final_result(questions, quiz_title, state)
+
+        with self._lock:
+            self._latest_partial = final
