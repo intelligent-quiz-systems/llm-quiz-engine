@@ -10,7 +10,8 @@ if str(SRC_DIR) not in sys.path:
 
 from llm.llm_client import run_prompt
 from llm.quiz_model import Quiz, TopicFromText
-from llm.generation_config import TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS
+from llm.generation_config import TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS, GUARDRAIL_MAX_QUESTIONS
+from llm.guardrail import build_guardrail_context, extract_question_texts, format_guardrail_log
 
 # Import Prompt Managera
 from prompt_manager.manager import PromptManager
@@ -44,17 +45,26 @@ def generate_quiz(
     topic: str,
     difficulty: str,
     num_questions: int,
-    source_text: str | None = None
+    source_text: str | None = None,
+    previous_questions: list[str] | None = None,
 ) -> str | None:
-    
+
     manager = PromptManager()
+
+    guardrail_ctx = build_guardrail_context(
+        previous_questions or [],
+        max_questions=GUARDRAIL_MAX_QUESTIONS,
+    )
+    use_guardrail = bool(previous_questions)
 
     built = manager.build_from_template(
         prompt_name="quiz_generation",
+        version="v2" if use_guardrail else None,
         topic=topic,
         difficulty=difficulty,
         num_questions=num_questions,
-        source_text=source_text[:QUIZ_SOURCE_CONTEXT_CHARS] if source_text else "No source text provided."
+        source_text=source_text[:QUIZ_SOURCE_CONTEXT_CHARS] if source_text else "No source text provided.",
+        guardrail=guardrail_ctx["text"],
     )
 
     if not built:
@@ -63,6 +73,9 @@ def generate_quiz(
 
     try:
         quiz_json = run_prompt(built["system"], built["user"], Quiz)
+
+        if use_guardrail:
+            print(f"\n===== GUARDRAIL =====\n{format_guardrail_log(guardrail_ctx)}")
 
         print("\n===== RESULT QUIZ JSON =====")
         print(quiz_json)
