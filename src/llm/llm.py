@@ -11,6 +11,10 @@ if str(SRC_DIR) not in sys.path:
 from llm.llm_client import run_prompt
 from llm.quiz_model import Quiz, TopicFromText
 
+# Import Prompt Managera
+from prompt_manager.manager import PromptManager
+
+
 TOPIC_EXTRACTION_CHARS = 2000
 QUIZ_SOURCE_CONTEXT_CHARS = 10000
 
@@ -19,32 +23,19 @@ def extract_topic_from_text(source_text: str) -> str | None:
     if not source_text or not source_text.strip():
         return None
 
-    system_prompt = (
-    """
-        You are a topic extraction assistant.
-        Return ONLY valid JSON with one field:
-        {
-          "topic": "string"
-        }
-        Rules:
-        - topic must be short and specific
-        - topic must be in Polish
-        - max 8 words
-    """
+    manager = PromptManager()
+
+    built = manager.build_from_template(
+        prompt_name="topic_extraction",
+        source_text=source_text[:TOPIC_EXTRACTION_CHARS]
     )
 
-    user_prompt = (
-       f"""
-        Extract the main topic from this text:
-
-        {source_text[:TOPIC_EXTRACTION_CHARS]}
-
-        Return ONLY JSON.
-        """
-    )
+    if not built:
+        print("Błąd: nie udało się pobrać promptu topic_extraction")
+        return None
 
     try:
-        response_json = run_prompt(system_prompt, user_prompt, TopicFromText)
+        response_json = run_prompt(built["system"], built["user"], TopicFromText)
         response = TopicFromText.model_validate(response_json)
         topic = response.topic.strip()
         return topic if topic else None
@@ -58,59 +49,27 @@ def generate_quiz(
     num_questions: int,
     source_text: str | None = None
 ) -> str | None:
-    system_prompt = (
-    """
-        You are a quiz generator.
+    
+    manager = PromptManager()
 
-        You must return ONLY valid JSON.
-        Do not include explanations, comments, markdown or text outside JSON.
-
-        The JSON must strictly follow this structure:
-
-        {
-        "questions": [
-            {
-            "question": "string",
-            "options": ["string", "string", "string", "string"],
-            "correct_index": 0
-            }
-        ]
-        }
-
-        Rules:
-        - options must contain exactly 4 answers
-        - correct_index must be an integer from 0 to 3
-        - return exactly the requested number of questions
-    """
+    built = manager.build_from_template(
+        prompt_name="quiz_generation",
+        topic=topic,
+        difficulty=difficulty,
+        num_questions=num_questions,
+        source_text=source_text[:QUIZ_SOURCE_CONTEXT_CHARS] if source_text else "No source text provided."
     )
 
-    user_prompt = (
-       f"""
-        Generate a quiz in Polish.
-
-        Topic: {topic}
-        Difficulty: {difficulty}
-        Source context text:
-        {source_text[:QUIZ_SOURCE_CONTEXT_CHARS] if source_text else "No source text provided."}
-
-        Requirements:
-        - exactly {num_questions} questions
-        - each question must have exactly 4 options
-        - correct_index must be between 0 and 3
-        - if source context text is provided: base ALL questions strictly on source context text
-        - if source context text is not provided: base questions on topic only
-
-        Return ONLY JSON.
-        """
-    )
+    if not built:
+        print("Błąd: nie udało się pobrać promptu quiz_generation")
+        return None
 
     try:
-        quiz_json = run_prompt(system_prompt, user_prompt, Quiz)
+        quiz_json = run_prompt(built["system"], built["user"], Quiz)
 
         print("\n===== RESULT QUIZ JSON =====")
-        print(quiz_json )
+        print(quiz_json)
 
-        # Validate returned JSON against the Pydantic model
         quiz = Quiz.model_validate(quiz_json)
 
         formatted_quiz_json = json.dumps(quiz_json, indent=2, ensure_ascii=False)
