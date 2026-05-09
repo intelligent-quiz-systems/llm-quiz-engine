@@ -136,10 +136,12 @@ elif st.session_state.app_step == "generating":
         st.rerun()
 
     elif snapshot.is_done:
+        err_detail = f": {snapshot.error}" if snapshot.error else ""
         st.session_state.generation_worker = None
-        st.session_state.generation_final_status = "failed"
+        st.session_state.generation_final_status = None
+        st.session_state.requested_question_count = 0
         st.session_state.app_step = "config"
-        st.error("Generowanie quizu nie powiodło się. Spróbuj ponownie.")
+        st.error(f"Generowanie quizu nie powiodło się. Spróbuj ponownie{err_detail}")
         st.stop()
 
     else:
