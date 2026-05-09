@@ -441,7 +441,9 @@ def reset_quiz_state():
     st.session_state.timeout_happened = False
     st.session_state.quiz_started_at = None
     st.session_state.history_saved = False
-
+    st.session_state.generation_worker = None
+    st.session_state.generation_final_status = None
+    st.session_state.requested_question_count = 0
 
     keys_to_remove = [k for k in st.session_state.keys() if k.startswith("widget_q_")]
     for key in keys_to_remove:
