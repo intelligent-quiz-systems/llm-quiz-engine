@@ -4,7 +4,7 @@ Batch retry/fallback strategy for quiz generation.
 Generates quiz questions in multiple API calls, reducing batch size
 on failures and retrying according to the configured limits.
 
-Error classification here is intentionally lightweight — it maps exceptions
+Error classification here is intentionally lightweight - it maps exceptions
 to control-flow decisions (reduce/retry/halt) only. For full diagnostic
 logging of error details, see the diagnostics/provider-error-details branch.
 """
@@ -16,7 +16,7 @@ import openai
 # Decision type for batch control flow
 Decision = Literal["accept", "retry", "reduce", "halt"]
 
-# Module-level defaults — match generation_config.py values.
+# Module-level defaults - match generation_config.py values.
 # Defined here so this module can be imported without triggering llm/__init__.py.
 INITIAL_BATCH_SIZE          : int = 10
 FALLBACK_BATCH_SIZE         : int = 5
@@ -76,8 +76,8 @@ def run_batched_generation(
     fallback_batch_size: int = FALLBACK_BATCH_SIZE,
     min_batch_size: int = MIN_BATCH_SIZE,
     max_attempts_per_size: int = MAX_ATTEMPTS_PER_BATCH_SIZE,
-    state=None,           # optional GenerationState — populated when provided
-    on_partial_ready=None,  # optional PartialReadyCallback — called after each accepted batch
+    state=None,           # optional GenerationState - populated when provided
+    on_partial_ready=None,  # optional PartialReadyCallback - called after each accepted batch
 ) -> dict | None:
     """
     Generate quiz questions in batches with retry/fallback.
@@ -86,7 +86,7 @@ def run_batched_generation(
     generation failed completely. The returned questions list may be shorter
     than num_questions if errors consumed some of the attempt budget.
     """
-    # Deferred imports — prevents env-var check at module import time
+    # Deferred imports - prevents env-var check at module import time
     from llm.llm_client import run_prompt
     from llm.quiz_model import Quiz
     from prompt_manager.manager import PromptManager
@@ -126,7 +126,7 @@ def run_batched_generation(
                 ),
             )
             if not built:
-                print("[batch] prompt build failed — halting")
+                print("[batch] prompt build failed - halting")
                 break
 
             result = run_prompt(built["system"], built["user"], Quiz)
@@ -143,7 +143,7 @@ def run_batched_generation(
                 current_batch += 1
                 batch_attempt_count = 0
                 attempts_at_size = 0
-                print(f"[batch] accepted {len(questions)}q — total {len(accumulated)}/{num_questions}")
+                print(f"[batch] accepted {len(questions)}q - total {len(accumulated)}/{num_questions}")
                 if on_partial_ready is not None and state is not None:
                     from llm.partial_loading import build_partial_result, should_return_partial
                     if should_return_partial(state):
@@ -152,7 +152,7 @@ def run_batched_generation(
 
         except Exception as exc:
             decision = classify_exception(exc)
-            print(f"[batch] {type(exc).__name__} → {decision}")
+            print(f"[batch] {type(exc).__name__} -> {decision}")
             if state is not None:
                 record_rejection(state, current_batch, batch_attempt_count, batch_size, decision, type(exc).__name__)
 
@@ -163,11 +163,11 @@ def run_batched_generation(
         if should_reduce(decision, attempts_at_size, max_attempts_per_size):
             new_size = reduce_batch_size(locked_size, fallback_batch_size, min_batch_size)
             if new_size < locked_size:
-                print(f"[batch] reducing {locked_size} → {new_size}")
+                print(f"[batch] reducing {locked_size} -> {new_size}")
                 locked_size = new_size
                 attempts_at_size = 0
             else:
-                print("[batch] already at minimum batch size — halting")
+                print("[batch] already at minimum batch size - halting")
                 break
         # else: "retry" → loop continues with same locked_size
 
