@@ -4,7 +4,7 @@ Batch retry/fallback strategy for quiz generation.
 Generates quiz questions in multiple API calls, reducing batch size
 on failures and retrying according to the configured limits.
 
-Error classification here is intentionally lightweight - it maps exceptions
+Error classification here is intentionally lightweight — it maps exceptions
 to control-flow decisions (reduce/retry/halt) only. For full diagnostic
 logging of error details, see the diagnostics/provider-error-details branch.
 """
@@ -16,7 +16,7 @@ import openai
 # Decision type for batch control flow
 Decision = Literal["accept", "retry", "reduce", "halt"]
 
-# Module-level defaults - match generation_config.py values.
+# Module-level defaults — match generation_config.py values.
 # Defined here so this module can be imported without triggering llm/__init__.py.
 INITIAL_BATCH_SIZE          : int = 10
 FALLBACK_BATCH_SIZE         : int = 5
@@ -76,8 +76,8 @@ def run_batched_generation(
     fallback_batch_size: int = FALLBACK_BATCH_SIZE,
     min_batch_size: int = MIN_BATCH_SIZE,
     max_attempts_per_size: int = MAX_ATTEMPTS_PER_BATCH_SIZE,
-    state=None,           # optional GenerationState - populated when provided
-    on_partial_ready=None,  # optional PartialReadyCallback - called after each accepted batch
+    state=None,           # optional GenerationState — populated when provided
+    on_partial_ready=None,  # optional PartialReadyCallback — called after each accepted batch
 ) -> dict | None:
     """
     Generate quiz questions in batches with retry/fallback.
@@ -86,7 +86,7 @@ def run_batched_generation(
     generation failed completely. The returned questions list may be shorter
     than num_questions if errors consumed some of the attempt budget.
     """
-    # Deferred imports - prevents env-var check at module import time
+    # Deferred imports — prevents env-var check at module import time
     from llm.llm_client import run_prompt
     from llm.quiz_model import Quiz
     from prompt_manager.manager import PromptManager
