@@ -9,6 +9,7 @@ to control-flow decisions (reduce/retry/halt) only. For full diagnostic
 logging of error details, see the diagnostics/provider-error-details branch.
 """
 from __future__ import annotations
+import time
 from typing import Literal
 
 import openai
@@ -113,6 +114,11 @@ def run_batched_generation(
         batch_attempt_count += 1
         decision: Decision = "halt"
 
+        # Per-attempt diagnostic accumulators (reset each iteration)
+        _s_chars = 0
+        _u_chars = 0
+        _attempt_start = time.monotonic()
+
         try:
             built = manager.build_from_template(
                 prompt_name="quiz_generation",
@@ -129,16 +135,32 @@ def run_batched_generation(
                 print("[batch] prompt build failed — halting")
                 break
 
-            result = run_prompt(built["system"], built["user"], Quiz)
-            questions = result.get("questions", [])
+            _s_chars = len(built["system"])
+            _u_chars = len(built["user"])
+
+            raw = run_prompt(built["system"], built["user"], Quiz, include_metadata=True)
+            _attempt_dur = round(time.monotonic() - _attempt_start, 3)
+
+            questions = raw["quiz"].get("questions", [])
 
             if not questions:
                 decision = "reduce"
             else:
                 if quiz_title is None:
-                    quiz_title = result.get("quiz_title", f"Quiz: {topic}")
+                    quiz_title = raw["quiz"].get("quiz_title", f"Quiz: {topic}")
                 if state is not None:
-                    record_accepted_batch(state, current_batch, batch_size, len(questions), batch_attempt_count)
+                    record_accepted_batch(
+                        state, current_batch, batch_size, len(questions), batch_attempt_count,
+                        attempt_duration_seconds=_attempt_dur,
+                        batch_duration_seconds=_attempt_dur,
+                        input_tokens=raw.get("input_tokens"),
+                        output_tokens=raw.get("output_tokens"),
+                        reasoning_tokens=raw.get("reasoning_tokens"),
+                        total_tokens=raw.get("total_tokens"),
+                        system_prompt_chars=_s_chars,
+                        user_prompt_chars=_u_chars,
+                        total_prompt_chars=_s_chars + _u_chars,
+                    )
                 accumulated.extend(questions)
                 current_batch += 1
                 batch_attempt_count = 0
@@ -151,10 +173,17 @@ def run_batched_generation(
                 continue
 
         except Exception as exc:
+            _attempt_dur = round(time.monotonic() - _attempt_start, 3)
             decision = classify_exception(exc)
             print(f"[batch] {type(exc).__name__} → {decision}")
             if state is not None:
-                record_rejection(state, current_batch, batch_attempt_count, batch_size, decision, type(exc).__name__)
+                record_rejection(
+                    state, current_batch, batch_attempt_count, batch_size, decision, type(exc).__name__,
+                    attempt_duration_seconds=_attempt_dur,
+                    system_prompt_chars=_s_chars,
+                    user_prompt_chars=_u_chars,
+                    total_prompt_chars=_s_chars + _u_chars,
+                )
 
         # Handle non-accept outcomes
         attempts_at_size += 1

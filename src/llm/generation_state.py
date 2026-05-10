@@ -10,19 +10,33 @@ from typing import TypedDict
 
 
 class RejectionLogEntry(TypedDict):
-    batch_number: int       # batch we were attempting (1-based)
-    attempt_number: int     # attempt within this batch (1-based)
+    batch_number: int           # batch we were attempting (1-based)
+    attempt_number: int         # attempt within this batch (1-based)
     attempted_batch_size: int
-    decision: str           # "reduce" | "retry" | "halt"
-    error_type: str         # exception class name
+    decision: str               # "reduce" | "retry" | "halt"
+    error_type: str             # exception class name
+    attempt_duration_seconds: float | None
+    provider_error_info: dict | None
+    system_prompt_chars: int
+    user_prompt_chars: int
+    total_prompt_chars: int
 
 
 class BatchLogEntry(TypedDict):
     batch_number: int
-    accepted_batch_size: int   # size of the call that was accepted
+    accepted_batch_size: int    # size of the call that was accepted
     accepted_questions: int
-    total_attempts: int        # includes failed attempts for this batch
-    outcome: str               # "accepted"
+    total_attempts: int         # includes failed attempts for this batch
+    outcome: str                # "accepted"
+    attempt_duration_seconds: float | None
+    batch_duration_seconds: float | None
+    input_tokens: int | None
+    output_tokens: int | None
+    reasoning_tokens: int | None
+    total_tokens: int | None
+    system_prompt_chars: int
+    user_prompt_chars: int
+    total_prompt_chars: int
 
 
 class GenerationState(TypedDict):
@@ -68,6 +82,16 @@ def record_accepted_batch(
     batch_size: int,
     questions_accepted: int,
     attempts: int,
+    *,
+    attempt_duration_seconds: float | None = None,
+    batch_duration_seconds: float | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    reasoning_tokens: int | None = None,
+    total_tokens: int | None = None,
+    system_prompt_chars: int = 0,
+    user_prompt_chars: int = 0,
+    total_prompt_chars: int = 0,
 ) -> None:
     state["total_batches"] += 1
     state["accepted_questions"] += questions_accepted
@@ -77,6 +101,15 @@ def record_accepted_batch(
         accepted_questions=questions_accepted,
         total_attempts=attempts,
         outcome="accepted",
+        attempt_duration_seconds=attempt_duration_seconds,
+        batch_duration_seconds=batch_duration_seconds,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        reasoning_tokens=reasoning_tokens,
+        total_tokens=total_tokens,
+        system_prompt_chars=system_prompt_chars,
+        user_prompt_chars=user_prompt_chars,
+        total_prompt_chars=total_prompt_chars,
     ))
 
 
@@ -87,6 +120,12 @@ def record_rejection(
     batch_size: int,
     decision: str,
     error_type: str,
+    *,
+    attempt_duration_seconds: float | None = None,
+    provider_error_info: dict | None = None,
+    system_prompt_chars: int = 0,
+    user_prompt_chars: int = 0,
+    total_prompt_chars: int = 0,
 ) -> None:
     state["rejected_attempts"] += 1
     state["rejection_log"].append(RejectionLogEntry(
@@ -95,6 +134,11 @@ def record_rejection(
         attempted_batch_size=batch_size,
         decision=decision,
         error_type=error_type,
+        attempt_duration_seconds=attempt_duration_seconds,
+        provider_error_info=provider_error_info,
+        system_prompt_chars=system_prompt_chars,
+        user_prompt_chars=user_prompt_chars,
+        total_prompt_chars=total_prompt_chars,
     ))
 
 
