@@ -113,7 +113,7 @@ class PromptManager:
             return True
 
         except Exception as e:
-            print(f"[ERR] Błąd podczas dodawania promptu '{prompt_name}': {e}")
+            print(f"[ERR] Failed to add prompt '{prompt_name}': {e}")
             return False
 
     def build_from_template(

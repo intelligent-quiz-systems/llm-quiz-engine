@@ -33,7 +33,7 @@ def extract_topic_from_text(source_text: str) -> str | None:
     )
 
     if not built:
-        print("Błąd: nie udało się pobrać promptu topic_extraction")
+        print("[ERR] Failed to load prompt: topic_extraction")
         return None
 
     try:

@@ -38,10 +38,6 @@ def run_prompt(system_prompt: str, user_prompt: str, response_model: type[BaseMo
         temperature = LLM_TEMPERATURE 
     )
 
-    print("\n===== RAW LLM RESPONSE =====")
-    print(response)
-    
-
     parsed_obj = response.output_parsed
 
     return parsed_obj.model_dump()
