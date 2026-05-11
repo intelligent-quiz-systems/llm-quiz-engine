@@ -19,3 +19,41 @@ class RAGSource:
     source_type: str
     source_name: str
     text: str
+
+@dataclass(slots=True)
+class RAGChunk:
+    chunk_id: str
+    source_id: str
+    source_type: str
+    source_name: str
+    section_label: str
+    token_count: int
+    text: str
+
+
+@dataclass(slots=True)
+class RAGBatch:
+    batch_id: str
+    chunks: list[RAGChunk] = field(default_factory=list)
+    total_tokens: int = 0
+
+    @property
+    def context_text(self) -> str:
+        blocks: list[str] = []
+        for chunk in self.chunks:
+            blocks.append(
+                "\n".join(
+                    [
+                        f"[SOURCE] {chunk.source_name}",
+                        f"[TYPE] {chunk.source_type}",
+                        f"[SECTION] {chunk.section_label}",
+                        f"[CHUNK_ID] {chunk.chunk_id}",
+                        f"[TOKENS] {chunk.token_count}",
+                        "",
+                        chunk.text,
+                    ]
+                )
+            )
+        return "\n\n".join(blocks)
+    
+    
