@@ -3,6 +3,7 @@ Run a series of tests from a matrix and coordinate report + Excel generation.
 """
 import csv
 import json
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -156,12 +157,23 @@ def run_series(
         if not _EXCEL_AVAILABLE:
             print("[WARN] openpyxl not installed — Excel skipped. Run: pip install openpyxl")
         else:
+            try:
+                git_branch = subprocess.check_output(
+                    ["git", "branch", "--show-current"],
+                    stderr=subprocess.DEVNULL, text=True,
+                ).strip() or None
+            except Exception:
+                git_branch = None
+
             excel_path = excel_dir / "analysis.xlsx"
             build_excel(
                 excel_path, results,
                 batch_rows=batch_rows,
                 rejection_rows=rejection_rows,
                 quality_rows=quality_rows,
+                run_id=series_dir.name,
+                run_datetime=now.strftime("%Y-%m-%d %H:%M:%S"),
+                git_branch=git_branch,
             )
 
     completed = sum(1 for r in results if r.get("ok"))

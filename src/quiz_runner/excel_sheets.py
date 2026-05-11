@@ -111,23 +111,163 @@ def _pct(numerator, denominator, digits: int = 1):
 
 # ── Sheet builders ────────────────────────────────────────────────────────────
 
-def add_pivot_full_sheet(wb: Workbook, enriched_results: list[dict]) -> None:
-    """Flat table — first sheet, no number prefix. Core pivot source."""
+"""
+Event warehouse column specification: (en_name, pl_description).
+One row per event: accepted_batch, rejected_attempt, quality_issue, generation_error.
+"""
+_PIVOT_COLUMNS: list[tuple[str, str]] = [
+    # ── Run / test context ────────────────────────────────────────────────────
+    ("series_group",           "Seria testów"),
+    ("run_datetime",           "Data i czas serii"),
+    ("git_branch",             "Gałąź git"),
+    ("nr_global",              "Nr globalny testu"),
+    ("label",                  "Etykieta testu"),
+    ("test_id",                "ID testu"),
+    ("topic",                  "Temat quizu"),
+    ("difficulty",             "Trudność"),
+    ("target_questions",       "Cel: pytania"),
+    ("accepted_questions",     "Zaakceptowanych pytań"),
+    ("missing_questions",      "Brakujące pytania"),
+    ("completion_pct",         "Kompletność (%)"),
+    ("status",                 "Status testu"),
+    ("duration_seconds",       "Czas testu (s)"),
+    ("n_batches",              "Batche łącznie"),
+    ("n_rejected_attempts",    "Odrzucone próby (test)"),
+    ("min_batch_size",         "Min. rozmiar wsadu"),
+    ("has_rejection",          "Były odrzucenia"),
+    # ── Event ─────────────────────────────────────────────────────────────────
+    ("event_type",             "Typ zdarzenia EN"),
+    ("event_type_pl",          "Typ zdarzenia PL"),
+    ("event_seq",              "Nr zdarzenia w teście"),
+    ("batch_number",           "Nr wsadu (batcha)"),
+    # ── Accepted batch ────────────────────────────────────────────────────────
+    ("batch_duration_seconds", "Czas wsadu (s)"),
+    ("attempts_count",         "Próby w wsadzie"),
+    ("rejected_attempts_count","Odrzucone w wsadzie"),
+    ("accepted_questions_count","Pytania zaakceptowane w wsadzie"),
+    ("final_accepted_batch_size","Ostateczny rozmiar wsadu"),
+    ("accepted_attempt_batch_size","Rozmiar zaakceptowanej próby"),
+    ("accepted_attempt_duration_seconds","Czas zaakceptowanej próby (s)"),
+    ("gross_s_per_q",          "Brutto s/pyt"),
+    ("clean_s_per_q",          "Netto s/pyt"),
+    ("rejection_overhead_s_total","Narzut odrzuceń (s)"),
+    ("rejection_overhead_s_per_q","Narzut odrzuceń/pyt (s)"),
+    ("rejection_overhead_pct", "Narzut odrzuceń (%)"),
+    # ── Rejected attempt ──────────────────────────────────────────────────────
+    ("attempt_number",         "Nr próby"),
+    ("attempted_batch_size",   "Rozmiar próby"),
+    ("attempt_duration_seconds","Czas próby (s)"),
+    ("reject_reason",          "Powód odrzucenia EN"),
+    ("reject_reason_pl",       "Powód odrzucenia PL"),
+    ("reject_family",          "Rodzina błędu"),
+    ("json_failure_kind",      "Rodzaj błędu JSON"),
+    ("json_failure_kind_pl",   "Rodzaj błędu JSON PL"),
+    ("provider_error_message_type","Typ komunikatu błędu"),
+    ("provider_http_status",   "HTTP status"),
+    ("provider_error_code",    "Kod błędu providera"),
+    ("provider_error_type",    "Typ błędu providera"),
+    ("provider_error_message", "Komunikat błędu providera"),
+    ("provider_payload_present","Payload obecny"),
+    ("provider_failed_generation_present","Nieudana generacja obecna"),
+    ("provider_failed_generation_blank","Generacja pusta"),
+    # ── Tokens ────────────────────────────────────────────────────────────────
+    ("token_usage_known",      "Tokeny znane"),
+    ("output_tokens_wasted",   "Tokeny zmarnowane"),
+    ("output_token_usage_pct", "Tokeny wyjściowe (%)"),
+    ("input_tokens_estimate",  "Tokeny wejściowe (est.)"),
+    ("input_tokens",           "Tokeny wejściowe"),
+    ("output_tokens",          "Tokeny wyjściowe"),
+    ("reasoning_tokens",       "Tokeny reasoning"),
+    ("total_tokens",           "Tokeny łącznie"),
+    # ── Guardrail / prompt ────────────────────────────────────────────────────
+    ("guardrail_question_count","Pytania guardrail"),
+    ("guardrail_chars",        "Znaki guardrail"),
+    ("total_prompt_chars",     "Znaki promptu łącznie"),
+    ("failed_generation_chars","Znaki nieudanej generacji"),
+    # ── Test-level token summary ──────────────────────────────────────────────
+    ("n_batches",              "Batche (test) — duplikat kontekstu"),
+    ("n_rejected_attempts",    "Odrzucone (test) — duplikat kontekstu"),
+    ("min_batch_size",         "Min wsad (test) — duplikat kontekstu"),
+    ("total_tokens_known",     "Tokeny znane (test)"),
+    ("tokens_per_target_q",    "Tokeny / cel. pytanie"),
+    ("rejected_time_s_detailed","Czas odrzuceń szczeg. (s)"),
+    # ── Normalized event fields ───────────────────────────────────────────────
+    ("event_duration_seconds", "Czas zdarzenia (s)"),
+    ("event_batch_size",       "Rozmiar zdarzenia (wsad)"),
+]
+
+# Remove the duplicated context columns that appear twice
+_SEEN: set[str] = set()
+_PIVOT_COLUMNS_DEDUP: list[tuple[str, str]] = []
+for _en, _pl in _PIVOT_COLUMNS:
+    if _en not in _SEEN:
+        _PIVOT_COLUMNS_DEDUP.append((_en, _pl))
+        _SEEN.add(_en)
+_PIVOT_COLUMNS = _PIVOT_COLUMNS_DEDUP
+
+# Event type colours
+_EVENT_FILL = {
+    "accepted_batch":   "E2EFDA",  # green
+    "rejected_attempt": "FCE4D6",  # red/orange
+    "quality_issue":    "FFF2CC",  # yellow
+    "generation_error": "F4CCCC",  # dark red
+}
+
+
+def add_pivot_full_sheet(wb: Workbook, event_rows: list[dict]) -> None:
+    """
+    Event warehouse fact table.
+    Two-row bilingual header: row 1 = Polish description (rotated 90),
+    row 2 = English machine name (rotated 90). Data from row 3.
+    """
     ws = wb.create_sheet("Dane_pivot_FULL")
-    headers = [
-        "test_id", "label", "topic", "difficulty",
-        "count_requested", "count_generated", "ok", "status",
-        "duration_seconds", "avg_seconds_per_question",
-        "n_batches", "n_rejected_attempts", "min_batch_size",
-        "total_tokens", "total_input_tokens", "total_output_tokens",
-        "total_reasoning_tokens", "avg_tokens_per_question",
-        "n_quality_issues", "total_rejection_duration_s", "error",
-    ]
-    for col, h in enumerate(headers, 1):
-        _hdr(ws, 1, col, h)
-    _write_rows(ws, headers, enriched_results)
-    ws.freeze_panes = "A2"
-    _auto_width(ws)
+
+    _HDR_BG2 = "1F3864"   # darker blue for EN row
+
+    # Row 1: Polish description — rotated
+    for col, (en_name, pl_name) in enumerate(_PIVOT_COLUMNS, 1):
+        c = ws.cell(row=1, column=col, value=pl_name)
+        c.font      = Font(bold=True, color=_HDR_FG, size=9)
+        c.fill      = PatternFill("solid", fgColor=_HDR_BG)
+        c.alignment = Alignment(textRotation=90, wrap_text=False,
+                                vertical="bottom", horizontal="center")
+
+    # Row 2: English machine name — rotated, slightly darker
+    for col, (en_name, pl_name) in enumerate(_PIVOT_COLUMNS, 1):
+        c = ws.cell(row=2, column=col, value=en_name)
+        c.font      = Font(bold=False, color=_HDR_FG, size=8, italic=True)
+        c.fill      = PatternFill("solid", fgColor=_HDR_BG2)
+        c.alignment = Alignment(textRotation=90, wrap_text=False,
+                                vertical="bottom", horizontal="center")
+
+    ws.row_dimensions[1].height = 110
+    ws.row_dimensions[2].height = 90
+
+    # Data rows from row 3
+    cols = [en for en, _ in _PIVOT_COLUMNS]
+    for ri, row in enumerate(event_rows, start=3):
+        ev_type = row.get("event_type", "")
+        fill_color = _EVENT_FILL.get(ev_type)
+        for col, key in enumerate(cols, 1):
+            val = row.get(key)
+            if isinstance(val, dict):
+                val = str(val)
+            cell = ws.cell(row=ri, column=col, value=val)
+            if fill_color:
+                cell.fill = PatternFill("solid", fgColor=fill_color)
+
+    # Freeze at row 3 (below both header rows)
+    ws.freeze_panes = "A3"
+    # Auto-filter on header row 2
+    ws.auto_filter.ref = f"A2:{get_column_letter(len(cols))}2"
+
+    # Column widths: narrow for numeric, wider for text
+    _TEXT_COLS = {"series_group", "test_id", "topic", "label", "status",
+                  "event_type", "event_type_pl", "reject_reason_pl",
+                  "provider_error_message", "reject_family"}
+    for col, (en_name, _) in enumerate(_PIVOT_COLUMNS, 1):
+        ltr = get_column_letter(col)
+        ws.column_dimensions[ltr].width = 18 if en_name in _TEXT_COLS else 8
 
 
 def add_dashboard_sheet(
