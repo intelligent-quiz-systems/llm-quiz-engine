@@ -14,32 +14,39 @@ except ImportError as exc:
 from quiz_runner.excel_sheets import (
     add_dashboard_sheet,
     add_tests_sheet,
-    add_schema_sheet,
     add_pivot_full_sheet,
+    add_batch_efficiency_sheet,
+    add_rejections_detail_sheet,
+    add_rejection_categories_sheet,
+    add_guardrail_stats_sheet,
+    add_quality_issues_sheet,
     add_column_dict_sheet,
 )
-from quiz_runner.report_builder import (
-    BATCH_EFFICIENCY_FIELDS,
-    REJECTIONS_DETAIL_FIELDS,
-    REJECTION_CATEGORIES_FIELDS,
-    GUARDRAIL_STATS_FIELDS,
-)
-
-_SCHEMA_NOTE = "Data not available in current generator version. Schema reserved for future diagnostics."
 
 
-def build_excel(output_path: Path, results: list[dict]) -> None:
+def build_excel(
+    output_path: Path,
+    results: list[dict],
+    batch_rows: list[dict] | None = None,
+    rejection_rows: list[dict] | None = None,
+    quality_rows: list[dict] | None = None,
+) -> None:
     """Build analysis.xlsx with all analytical sheets."""
+    batch_rows     = batch_rows     or []
+    rejection_rows = rejection_rows or []
+    quality_rows   = quality_rows   or []
+
     wb = openpyxl.Workbook()
     wb.remove(wb.active)  # remove default blank sheet
 
     add_pivot_full_sheet(wb, results)
-    add_dashboard_sheet(wb, results)
+    add_dashboard_sheet(wb, results, batch_rows=batch_rows, rejection_rows=rejection_rows)
     add_tests_sheet(wb, results)
-    add_schema_sheet(wb, "03_Batch_efficiency",    BATCH_EFFICIENCY_FIELDS,    _SCHEMA_NOTE)
-    add_schema_sheet(wb, "04_Rejections_detail",   REJECTIONS_DETAIL_FIELDS,   _SCHEMA_NOTE)
-    add_schema_sheet(wb, "05_Rejection_categories", REJECTION_CATEGORIES_FIELDS, _SCHEMA_NOTE)
-    add_schema_sheet(wb, "06_Guardrail_stats",     GUARDRAIL_STATS_FIELDS,     _SCHEMA_NOTE)
+    add_batch_efficiency_sheet(wb, batch_rows)
+    add_rejections_detail_sheet(wb, rejection_rows)
+    add_rejection_categories_sheet(wb, rejection_rows)
+    add_guardrail_stats_sheet(wb, batch_rows)
+    add_quality_issues_sheet(wb, quality_rows)
     add_column_dict_sheet(wb)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
