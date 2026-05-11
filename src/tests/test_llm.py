@@ -101,6 +101,7 @@ def load_llm_module(
     mod_batch     = ModuleType("llm.batch_strategy")
     mod_state     = ModuleType("llm.generation_state")
     mod_config    = ModuleType("llm.generation_config")
+    mod_quality   = ModuleType("llm.question_quality")
     mod_pm_pkg    = ModuleType("prompt_manager")
     mod_pm        = ModuleType("prompt_manager.manager")
 
@@ -116,6 +117,9 @@ def load_llm_module(
     mod_config.FALLBACK_BATCH_SIZE           = 5
     mod_config.MIN_BATCH_SIZE                = 1
     mod_config.MAX_ATTEMPTS_PER_BATCH_SIZE   = 2
+    mod_config.SIMILAR_QUESTION_THRESHOLD    = 0.7
+    mod_quality.run_quality_checks           = Mock(return_value=[])
+    mod_quality.format_quality_log           = Mock(return_value="")
 
     # PromptManager used only by extract_topic_from_text
     fake_pm_instance = Mock()
@@ -128,7 +132,7 @@ def load_llm_module(
     for key, mod in [
         ("llm", pkg_llm), ("llm.llm_client", mod_client), ("llm.quiz_model", mod_model),
         ("llm.batch_strategy", mod_batch), ("llm.generation_state", mod_state),
-        ("llm.generation_config", mod_config),
+        ("llm.generation_config", mod_config), ("llm.question_quality", mod_quality),
         ("prompt_manager", mod_pm_pkg), ("prompt_manager.manager", mod_pm),
     ]:
         sys.modules[key] = mod
