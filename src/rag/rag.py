@@ -81,3 +81,20 @@ def make_wikipedia_source(source_id: str, page_title: str, extracted_text: str) 
         source_name=page_title,
         text=normalize_text(extracted_text),
     )    
+
+def normalize_text(text: str) -> str:
+    if not text:
+        return ""
+
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = re.sub(r"[ \t]+", " ", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
+
+
+def estimate_token_count(text: str) -> int:
+    stripped = text.strip()
+    if not stripped:
+        return 0
+    
+    return math.ceil(len(stripped) / 4)
