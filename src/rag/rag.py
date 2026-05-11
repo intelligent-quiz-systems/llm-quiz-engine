@@ -56,4 +56,28 @@ class RAGBatch:
             )
         return "\n\n".join(blocks)
     
-    
+@dataclass(slots=True)
+class RAGBatchLog:
+    batch_id: str
+    chunk_ids: list[str]
+    source_names: list[str]
+    total_tokens: int
+    chunk_count: int
+
+
+def make_file_source(source_id: str, file_name: str, extracted_text: str) -> RAGSource:
+    return RAGSource(
+        source_id=source_id,
+        source_type="file",
+        source_name=file_name,
+        text=normalize_text(extracted_text),
+    )
+
+
+def make_wikipedia_source(source_id: str, page_title: str, extracted_text: str) -> RAGSource:
+    return RAGSource(
+        source_id=source_id,
+        source_type="wikipedia",
+        source_name=page_title,
+        text=normalize_text(extracted_text),
+    )    
