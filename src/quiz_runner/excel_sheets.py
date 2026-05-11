@@ -516,6 +516,8 @@ def add_quality_issues_sheet(wb: Workbook, quality_rows: list[dict]) -> None:
 
 def add_slownik_kolumn_sheet(wb: Workbook) -> None:
     ws = wb.create_sheet("11_Slownik_kolumn")
+
+    # ── Section 1: Column dictionary ─────────────────────────────────────────
     _hdr(ws, 1, 1, "Kolumna (EN snake_case)")
     _hdr(ws, 1, 2, "Opis PL")
     _hdr(ws, 1, 3, "Grupa")
@@ -524,7 +526,45 @@ def add_slownik_kolumn_sheet(wb: Workbook) -> None:
         ws.cell(row=ri, column=2, value=pl)
         c = ws.cell(row=ri, column=3, value=grp)
         c.fill = PatternFill("solid", fgColor=_GRP[grp])
+
+    # ── Section 2: Row colour legend (Dane_pivot_FULL) ────────────────────────
+    gap = len(_PIVOT_COLUMNS) + 3
+    ws.cell(row=gap, column=1, value="Legenda kolorow wierszy (Dane_pivot_FULL)").font = Font(bold=True, size=11)
+    legend = [
+        ("accepted_batch",   _EVENT_FILL["accepted_batch"],   "Zaakceptowany wsad — batch API z potwierdzonym generowaniem"),
+        ("rejected_attempt", _EVENT_FILL["rejected_attempt"],  "Odrzucona proba — nieudana proba generowania, konczy sie reduce/retry/halt"),
+        ("quality_issue",    _EVENT_FILL["quality_issue"],     "Problem jakosci — duplikat lub podobne pytanie wykryte po generacji"),
+        ("generation_error", _EVENT_FILL["generation_error"],  "Blad generacji — caly test zakonczony wyjatkiem (brak API, timeout etc.)"),
+    ]
+    for i, (et, color, desc) in enumerate(legend, start=gap + 1):
+        c_ev = ws.cell(row=i, column=1, value=et)
+        c_ev.fill = PatternFill("solid", fgColor=color)
+        c_ev.font = Font(bold=True)
+        ws.cell(row=i, column=2, value=desc)
+
+    # ── Section 3: Column group colour legend ─────────────────────────────────
+    gap2 = gap + len(legend) + 2
+    ws.cell(row=gap2, column=1, value="Legenda kolorow naglowkow kolumn (grupy)").font = Font(bold=True, size=11)
+    group_desc = [
+        ("run",       "Kontekst serii / run metadata"),
+        ("test_id",   "Identyfikacja testu"),
+        ("test_ok",   "Wyniki testu"),
+        ("event",     "Rdzen zdarzenia"),
+        ("batch",     "Metryki wsadu (batch efficiency)"),
+        ("rejection", "Szczegoly odrzucenia"),
+        ("provider",  "Bledy providera LLM"),
+        ("tokens",    "Tokeny"),
+        ("guardrail", "Guardrail i prompt"),
+        ("summary",   "Podsumowanie test-level"),
+        ("ev_key",    "Kluczowe metryki zdarzenia"),
+    ]
+    for i, (grp, desc) in enumerate(group_desc, start=gap2 + 1):
+        c = ws.cell(row=i, column=1, value=grp)
+        c.fill = PatternFill("solid", fgColor=_GRP[grp])
+        ws.cell(row=i, column=2, value=desc)
+
     ws.column_dimensions["A"].width = 38
-    ws.column_dimensions["B"].width = 32
+    ws.column_dimensions["B"].width = 58
     ws.column_dimensions["C"].width = 12
+    ws.freeze_panes = "A2"
     ws.freeze_panes = "A2"

@@ -262,7 +262,13 @@ def test_autofilter_set(workbook):
 
 def test_slownik_kolumn_has_all_columns(workbook):
     ws = workbook["11_Slownik_kolumn"]
-    # header row + 67 data rows = 68 total
-    assert ws.max_row == EXPECTED_N_COLS + 1, (
-        f"11_Slownik_kolumn: expected {EXPECTED_N_COLS + 1} rows, got {ws.max_row}"
+    # header row + 67 column rows + legend sections (colour legends added below)
+    min_expected = EXPECTED_N_COLS + 1  # at minimum header + all columns
+    assert ws.max_row >= min_expected, (
+        f"11_Slownik_kolumn: expected at least {min_expected} rows, got {ws.max_row}"
     )
+    # Verify EN column names are in the first column (skip header row 1)
+    col_a = [ws.cell(row=ri, column=1).value for ri in range(2, EXPECTED_N_COLS + 2)]
+    from quiz_runner.excel_sheets import _PIVOT_COLUMNS
+    expected_en = [en for en, *_ in _PIVOT_COLUMNS]
+    assert col_a == expected_en, "Column EN names in Slownik_kolumn don't match _PIVOT_COLUMNS"
