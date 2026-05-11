@@ -165,7 +165,7 @@ def run_series(
             except Exception:
                 git_branch = None
 
-            excel_path = excel_dir / "analysis.xlsx"
+            excel_path = excel_dir / "llm_observability_analytics.xlsx"
             build_excel(
                 excel_path, results,
                 batch_rows=batch_rows,

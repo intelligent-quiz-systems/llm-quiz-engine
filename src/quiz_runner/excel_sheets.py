@@ -8,70 +8,133 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
-# ── Colours ───────────────────────────────────────────────────────────────────
-_HDR_BG   = "2F5496"
-_HDR_FG   = "FFFFFF"
+# ── Common header style ───────────────────────────────────────────────────────
+_HDR_FG   = "000000"   # black text on coloured group backgrounds
 _OK_BG    = "E2EFDA"
 _FAIL_BG  = "FCE4D6"
 _WARN_BG  = "FFF2CC"
-_NOTE_FG  = "808080"
+_BLUE_HDR = "2F5496"   # used for helper sheets
+_WHT      = "FFFFFF"
 
 NA = "n/a"
 
 
-# ── Column dictionary ─────────────────────────────────────────────────────────
-COLUMN_DICT = [
-    ("test_id",                   "Identyfikator testu (nazwa folderu)"),
-    ("label",                     "Opcjonalna etykieta testu"),
-    ("topic",                     "Temat quizu"),
-    ("difficulty",                "Poziom trudności: easy / medium / hard"),
-    ("count_requested",           "Żądana liczba pytań"),
-    ("count_generated",           "Wygenerowana liczba pytań"),
-    ("ok",                        "True jeśli test zakończony sukcesem"),
-    ("status",                    "Status: completed / failed / partial / dry-run"),
-    ("duration_seconds",          "Czas trwania całego testu (s)"),
-    ("avg_seconds_per_question",  "Średni czas na jedno wygenerowane pytanie (s)"),
-    ("n_batches",                 "Liczba zaakceptowanych wsadów API"),
-    ("n_rejected_attempts",       "Liczba odrzuconych prób generacji"),
-    ("min_batch_size",            "Minimalny rozmiar wsadu osiągnięty podczas fallback"),
-    ("total_tokens",              "Łączne tokeny (input + output) ze wszystkich wsadów"),
-    ("total_input_tokens",        "Łączne tokeny wejściowe (prompt)"),
-    ("total_output_tokens",       "Łączne tokeny wyjściowe (odpowiedź)"),
-    ("total_reasoning_tokens",    "Łączne tokeny reasoning"),
-    ("avg_tokens_per_question",   "Średnia tokenów (total) na wygenerowane pytanie"),
-    ("n_quality_issues",          "Liczba problemów jakości wykrytych w wygenerowanym quizie"),
-    ("total_rejection_duration_s","Łączny czas stracony na odrzucone próby (s)"),
-    ("error",                     "Komunikat błędu jeśli status != completed"),
-    ("batch_number",              "Numer wsadu w ramach testu (1-based)"),
-    ("accepted_batch_size",       "Rozmiar zaakceptowanego wsadu"),
-    ("accepted_questions",        "Pytania zaakceptowane w tym wsadzie"),
-    ("total_attempts",            "Łączna liczba prób dla tego wsadu (zaakceptowane + odrzucone)"),
-    ("attempt_duration_seconds",  "Czas trwania próby w sekundach"),
-    ("input_tokens",              "Tokeny wejściowe dla wsadu"),
-    ("output_tokens",             "Tokeny wyjściowe dla wsadu"),
-    ("reasoning_tokens",          "Tokeny reasoning dla wsadu"),
-    ("system_prompt_chars",       "Długość system prompt w znakach"),
-    ("user_prompt_chars",         "Długość user prompt w znakach"),
-    ("total_prompt_chars",        "Łączna długość promptu w znakach"),
-    ("guardrail_question_count",  "Liczba pytań w kontekście guardrail"),
-    ("guardrail_chars",           "Długość tekstu guardrail w znakach"),
-    ("decision",                  "Decyzja po nieudanej próbie: reduce / retry / halt"),
-    ("error_type",                "Typ wyjątku Python"),
-    ("attempted_batch_size",      "Rozmiar wsadu w momencie odrzucenia"),
-    ("provider_error_info",       "Szczegóły błędu od providera LLM (jako string)"),
-    ("issue_type",                "Typ problemu jakości: duplicate / similar / duplicate_options"),
-    ("question_index",            "Indeks pytania (0-based)"),
-    ("question_text",             "Tekst pytania"),
-    ("detail",                    "Szczegół problemu jakości"),
+# ── Pivot column group colours ────────────────────────────────────────────────
+_GRP = {
+    "run":       "B4C7E7",   # blue-gray  — run/series context
+    "test_id":   "9DC3E6",   # blue       — test identification
+    "test_ok":   "C6E0B4",   # green      — test results
+    "event":     "D9C9E8",   # purple     — event core
+    "batch":     "BDD7EE",   # light blue — batch efficiency
+    "rejection": "F8CBAD",   # orange     — rejection detail
+    "provider":  "FFCCCC",   # red        — provider errors
+    "tokens":    "FFE699",   # yellow     — token data
+    "guardrail": "C6EFCE",   # teal       — guardrail / prompt
+    "summary":   "D9D9D9",   # gray       — test-level summary
+    "ev_key":    "BDD7EE",   # same blue  — event key metrics
+}
+
+# ── Pivot column specification ────────────────────────────────────────────────
+# (en_name, pl_short, rotate_90, group_key, col_width)
+# rotate_90=True  → textRotation=90 (short numeric/bool cols)
+# rotate_90=False → textRotation=0, wrap_text=True (text cols)
+_PIVOT_COLUMNS: list[tuple] = [
+    # Run context ─────────────────────────────────────────────────────────────
+    ("series_group",           "seria testów",              False, "run",       22),
+    ("run_datetime",           "data i czas serii",         False, "run",       20),
+    ("git_branch",             "gałąź git",                 False, "run",       16),
+    # Test identification ──────────────────────────────────────────────────────
+    ("nr_global",              "nr globalny testu",         True,  "test_id",    8),
+    ("label",                  "etykieta testu",            False, "test_id",   18),
+    ("test_id",                "ID testu",                  False, "test_id",   24),
+    ("topic",                  "temat quizu",               False, "test_id",   22),
+    ("difficulty",             "trudność",                  False, "test_id",   10),
+    # Test results ─────────────────────────────────────────────────────────────
+    ("target_questions",       "cel: pytania",              True,  "test_ok",    8),
+    ("accepted_questions",     "zaakceptowanych pytań",     True,  "test_ok",    8),
+    ("missing_questions",      "brakujące pytania",         True,  "test_ok",    8),
+    ("completion_pct",         "kompletność [%]",           True,  "test_ok",    8),
+    ("status",                 "status testu",              False, "test_ok",   12),
+    ("duration_seconds",       "czas testu [s]",            True,  "test_ok",    8),
+    # Event core ───────────────────────────────────────────────────────────────
+    ("event_type",             "typ zdarzenia EN",          False, "event",     18),
+    ("event_type_pl",          "typ zdarzenia PL",          False, "event",     20),
+    ("event_seq",              "nr zdarzenia w teście",     True,  "event",      8),
+    ("has_rejection",          "były odrzucenia",           True,  "event",      8),
+    ("batch_number",           "nr wsadu",                  True,  "event",      8),
+    # Batch efficiency ─────────────────────────────────────────────────────────
+    ("batch_duration_seconds", "czas wsadu [s]",            True,  "batch",      8),
+    ("attempts_count",         "próby w wsadzie",           True,  "batch",      8),
+    ("rejected_attempts_count","odrzucone w wsadzie",       True,  "batch",      8),
+    ("accepted_questions_count","pyt. zaakc. w wsadzie",   True,  "batch",      8),
+    ("final_accepted_batch_size","ostateczny rozmiar wsadu",True,  "batch",      8),
+    ("accepted_attempt_batch_size","rozmiar zaakc. próby", True,  "batch",      8),
+    ("accepted_attempt_duration_seconds","czas zaakc. próby [s]",True,"batch",  8),
+    ("gross_s_per_q",          "brutto [s/pyt]",            True,  "batch",      8),
+    ("clean_s_per_q",          "netto [s/pyt]",             True,  "batch",      8),
+    ("rejection_overhead_s_total","narzut odrzuceń [s]",    True,  "batch",      8),
+    ("rejection_overhead_s_per_q","narzut/pyt [s]",         True,  "batch",      8),
+    ("rejection_overhead_pct", "narzut odrzuceń [%]",       True,  "batch",      8),
+    # Rejection detail ─────────────────────────────────────────────────────────
+    ("attempt_number",         "nr próby",                  True,  "rejection",  8),
+    ("attempted_batch_size",   "rozmiar próby",             True,  "rejection",  8),
+    ("attempt_duration_seconds","czas próby [s]",           True,  "rejection",  8),
+    ("reject_reason",          "powód odrzucenia EN",       False, "rejection", 14),
+    ("reject_reason_pl",       "powód odrzucenia PL",       False, "rejection", 16),
+    ("reject_family",          "rodzina błędu",             False, "rejection", 14),
+    ("json_failure_kind",      "rodzaj błędu JSON",         False, "rejection", 16),
+    ("json_failure_kind_pl",   "rodzaj błędu JSON PL",      False, "rejection", 16),
+    # Provider errors ──────────────────────────────────────────────────────────
+    ("provider_error_message_type","typ komunikatu błędu",  False, "provider",  18),
+    ("provider_http_status",   "HTTP status",               True,  "provider",   8),
+    ("provider_error_code",    "kod błędu prov.",           True,  "provider",   8),
+    ("provider_error_type",    "typ błędu prov.",           False, "provider",  16),
+    ("provider_error_message", "komunikat błędu prov.",     False, "provider",  22),
+    ("provider_payload_present","payload obecny",           True,  "provider",   8),
+    ("provider_failed_generation_present","nieudana gen. obecna",True,"provider",8),
+    ("provider_failed_generation_blank","generacja pusta",  True,  "provider",   8),
+    # Tokens ───────────────────────────────────────────────────────────────────
+    ("token_usage_known",      "tokeny znane",              True,  "tokens",     8),
+    ("output_tokens_wasted",   "tokeny zmarnowane",         True,  "tokens",     8),
+    ("output_token_usage_pct", "tokeny wyj. [%]",           True,  "tokens",     8),
+    ("input_tokens_estimate",  "tokeny wej. (est.)",        True,  "tokens",     8),
+    ("input_tokens",           "tokeny wejściowe",          True,  "tokens",     8),
+    ("output_tokens",          "tokeny wyjściowe",          True,  "tokens",     8),
+    ("reasoning_tokens",       "tokeny reasoning",          True,  "tokens",     8),
+    ("total_tokens",           "tokeny łącznie",            True,  "tokens",     8),
+    # Guardrail / prompt ───────────────────────────────────────────────────────
+    ("guardrail_question_count","pytania guardrail",        True,  "guardrail",  8),
+    ("guardrail_chars",        "znaki guardrail",           True,  "guardrail",  8),
+    ("total_prompt_chars",     "znaki promptu łącznie",     True,  "guardrail",  8),
+    ("failed_generation_chars","znaki nieudanej gen.",      True,  "guardrail",  8),
+    # Test-level summary ───────────────────────────────────────────────────────
+    ("n_batches",              "batche łącznie (test)",     True,  "summary",    8),
+    ("n_rejected_attempts",    "odrzucone próby (test)",    True,  "summary",    8),
+    ("min_batch_size",         "min. rozmiar wsadu",        True,  "summary",    8),
+    ("total_tokens_known",     "tokeny znane (test)",       True,  "summary",    8),
+    ("tokens_per_target_q",    "tokeny / cel. pytanie",     True,  "summary",    8),
+    ("rejected_time_s_detailed","czas odrzuceń szczeg. [s]",True, "summary",    8),
+    # Event key metrics ────────────────────────────────────────────────────────
+    ("event_duration_seconds", "czas zdarzenia [s]",        True,  "ev_key",     8),
+    ("event_batch_size",       "rozmiar zdarzenia (wsad)",  True,  "ev_key",     8),
 ]
+
+# Event row colours by event_type
+_EVENT_FILL = {
+    "accepted_batch":   "E2EFDA",
+    "rejected_attempt": "FCE4D6",
+    "quality_issue":    "FFF2CC",
+    "generation_error": "FFCCCC",
+}
 
 
 # ── Style helpers ─────────────────────────────────────────────────────────────
 
 def _hdr(ws, row: int, col: int, value: str):
+    """Standard helper sheet header cell (blue bg, white text)."""
     c = ws.cell(row=row, column=col, value=value)
-    c.font = Font(bold=True, color=_HDR_FG, size=10)
-    c.fill = PatternFill("solid", fgColor=_HDR_BG)
+    c.font      = Font(bold=True, color=_WHT, size=10)
+    c.fill      = PatternFill("solid", fgColor=_BLUE_HDR)
     c.alignment = Alignment(wrap_text=True, vertical="center", horizontal="center")
     return c
 
@@ -95,180 +158,72 @@ def _write_rows(ws, headers: list[str], rows: list[dict], start_row: int = 2) ->
             ws.cell(row=ri, column=col, value=val)
 
 
-def _round(v, digits: int = 3):
+def _round(v, d: int = 3):
     try:
-        return round(float(v), digits) if v is not None else NA
+        return round(float(v), d) if v is not None else NA
     except (TypeError, ValueError):
         return NA
 
 
-def _pct(numerator, denominator, digits: int = 1):
+def _pct(num, den, d: int = 1):
     try:
-        return round(100.0 * numerator / denominator, digits) if denominator else NA
+        return round(100.0 * num / den, d) if den else NA
     except (TypeError, ValueError):
         return NA
 
 
-# ── Sheet builders ────────────────────────────────────────────────────────────
-
-"""
-Event warehouse column specification: (en_name, pl_description).
-One row per event: accepted_batch, rejected_attempt, quality_issue, generation_error.
-"""
-_PIVOT_COLUMNS: list[tuple[str, str]] = [
-    # ── Run / test context ────────────────────────────────────────────────────
-    ("series_group",           "Seria testów"),
-    ("run_datetime",           "Data i czas serii"),
-    ("git_branch",             "Gałąź git"),
-    ("nr_global",              "Nr globalny testu"),
-    ("label",                  "Etykieta testu"),
-    ("test_id",                "ID testu"),
-    ("topic",                  "Temat quizu"),
-    ("difficulty",             "Trudność"),
-    ("target_questions",       "Cel: pytania"),
-    ("accepted_questions",     "Zaakceptowanych pytań"),
-    ("missing_questions",      "Brakujące pytania"),
-    ("completion_pct",         "Kompletność (%)"),
-    ("status",                 "Status testu"),
-    ("duration_seconds",       "Czas testu (s)"),
-    ("n_batches",              "Batche łącznie"),
-    ("n_rejected_attempts",    "Odrzucone próby (test)"),
-    ("min_batch_size",         "Min. rozmiar wsadu"),
-    ("has_rejection",          "Były odrzucenia"),
-    # ── Event ─────────────────────────────────────────────────────────────────
-    ("event_type",             "Typ zdarzenia EN"),
-    ("event_type_pl",          "Typ zdarzenia PL"),
-    ("event_seq",              "Nr zdarzenia w teście"),
-    ("batch_number",           "Nr wsadu (batcha)"),
-    # ── Accepted batch ────────────────────────────────────────────────────────
-    ("batch_duration_seconds", "Czas wsadu (s)"),
-    ("attempts_count",         "Próby w wsadzie"),
-    ("rejected_attempts_count","Odrzucone w wsadzie"),
-    ("accepted_questions_count","Pytania zaakceptowane w wsadzie"),
-    ("final_accepted_batch_size","Ostateczny rozmiar wsadu"),
-    ("accepted_attempt_batch_size","Rozmiar zaakceptowanej próby"),
-    ("accepted_attempt_duration_seconds","Czas zaakceptowanej próby (s)"),
-    ("gross_s_per_q",          "Brutto s/pyt"),
-    ("clean_s_per_q",          "Netto s/pyt"),
-    ("rejection_overhead_s_total","Narzut odrzuceń (s)"),
-    ("rejection_overhead_s_per_q","Narzut odrzuceń/pyt (s)"),
-    ("rejection_overhead_pct", "Narzut odrzuceń (%)"),
-    # ── Rejected attempt ──────────────────────────────────────────────────────
-    ("attempt_number",         "Nr próby"),
-    ("attempted_batch_size",   "Rozmiar próby"),
-    ("attempt_duration_seconds","Czas próby (s)"),
-    ("reject_reason",          "Powód odrzucenia EN"),
-    ("reject_reason_pl",       "Powód odrzucenia PL"),
-    ("reject_family",          "Rodzina błędu"),
-    ("json_failure_kind",      "Rodzaj błędu JSON"),
-    ("json_failure_kind_pl",   "Rodzaj błędu JSON PL"),
-    ("provider_error_message_type","Typ komunikatu błędu"),
-    ("provider_http_status",   "HTTP status"),
-    ("provider_error_code",    "Kod błędu providera"),
-    ("provider_error_type",    "Typ błędu providera"),
-    ("provider_error_message", "Komunikat błędu providera"),
-    ("provider_payload_present","Payload obecny"),
-    ("provider_failed_generation_present","Nieudana generacja obecna"),
-    ("provider_failed_generation_blank","Generacja pusta"),
-    # ── Tokens ────────────────────────────────────────────────────────────────
-    ("token_usage_known",      "Tokeny znane"),
-    ("output_tokens_wasted",   "Tokeny zmarnowane"),
-    ("output_token_usage_pct", "Tokeny wyjściowe (%)"),
-    ("input_tokens_estimate",  "Tokeny wejściowe (est.)"),
-    ("input_tokens",           "Tokeny wejściowe"),
-    ("output_tokens",          "Tokeny wyjściowe"),
-    ("reasoning_tokens",       "Tokeny reasoning"),
-    ("total_tokens",           "Tokeny łącznie"),
-    # ── Guardrail / prompt ────────────────────────────────────────────────────
-    ("guardrail_question_count","Pytania guardrail"),
-    ("guardrail_chars",        "Znaki guardrail"),
-    ("total_prompt_chars",     "Znaki promptu łącznie"),
-    ("failed_generation_chars","Znaki nieudanej generacji"),
-    # ── Test-level token summary ──────────────────────────────────────────────
-    ("n_batches",              "Batche (test) — duplikat kontekstu"),
-    ("n_rejected_attempts",    "Odrzucone (test) — duplikat kontekstu"),
-    ("min_batch_size",         "Min wsad (test) — duplikat kontekstu"),
-    ("total_tokens_known",     "Tokeny znane (test)"),
-    ("tokens_per_target_q",    "Tokeny / cel. pytanie"),
-    ("rejected_time_s_detailed","Czas odrzuceń szczeg. (s)"),
-    # ── Normalized event fields ───────────────────────────────────────────────
-    ("event_duration_seconds", "Czas zdarzenia (s)"),
-    ("event_batch_size",       "Rozmiar zdarzenia (wsad)"),
-]
-
-# Remove the duplicated context columns that appear twice
-_SEEN: set[str] = set()
-_PIVOT_COLUMNS_DEDUP: list[tuple[str, str]] = []
-for _en, _pl in _PIVOT_COLUMNS:
-    if _en not in _SEEN:
-        _PIVOT_COLUMNS_DEDUP.append((_en, _pl))
-        _SEEN.add(_en)
-_PIVOT_COLUMNS = _PIVOT_COLUMNS_DEDUP
-
-# Event type colours
-_EVENT_FILL = {
-    "accepted_batch":   "E2EFDA",  # green
-    "rejected_attempt": "FCE4D6",  # red/orange
-    "quality_issue":    "FFF2CC",  # yellow
-    "generation_error": "F4CCCC",  # dark red
-}
-
+# ── Pivot fact table ──────────────────────────────────────────────────────────
 
 def add_pivot_full_sheet(wb: Workbook, event_rows: list[dict]) -> None:
     """
-    Event warehouse fact table.
-    Two-row bilingual header: row 1 = Polish description (rotated 90),
-    row 2 = English machine name (rotated 90). Data from row 3.
+    Event warehouse fact table. Single bilingual header row:
+      top line: Polish description
+      bottom line: EN snake_case field name
+    Columns use group-specific background colours.
+    Numeric/short columns rotate 90°; text columns stay horizontal.
     """
     ws = wb.create_sheet("Dane_pivot_FULL")
 
-    _HDR_BG2 = "1F3864"   # darker blue for EN row
+    # ── Header row ────────────────────────────────────────────────────────────
+    for col, (en, pl, rotate, grp, width) in enumerate(_PIVOT_COLUMNS, 1):
+        cell_val = f"{pl}\n{en}"
+        c = ws.cell(row=1, column=col, value=cell_val)
+        c.font = Font(bold=True, color=_HDR_FG, size=9)
+        c.fill = PatternFill("solid", fgColor=_GRP[grp])
+        if rotate:
+            c.alignment = Alignment(
+                textRotation=90, wrap_text=False,
+                vertical="bottom", horizontal="center",
+            )
+        else:
+            c.alignment = Alignment(
+                textRotation=0, wrap_text=True,
+                vertical="bottom", horizontal="left",
+            )
+        ws.column_dimensions[get_column_letter(col)].width = width
 
-    # Row 1: Polish description — rotated
-    for col, (en_name, pl_name) in enumerate(_PIVOT_COLUMNS, 1):
-        c = ws.cell(row=1, column=col, value=pl_name)
-        c.font      = Font(bold=True, color=_HDR_FG, size=9)
-        c.fill      = PatternFill("solid", fgColor=_HDR_BG)
-        c.alignment = Alignment(textRotation=90, wrap_text=False,
-                                vertical="bottom", horizontal="center")
+    ws.row_dimensions[1].height = 130   # tall header for rotated text
 
-    # Row 2: English machine name — rotated, slightly darker
-    for col, (en_name, pl_name) in enumerate(_PIVOT_COLUMNS, 1):
-        c = ws.cell(row=2, column=col, value=en_name)
-        c.font      = Font(bold=False, color=_HDR_FG, size=8, italic=True)
-        c.fill      = PatternFill("solid", fgColor=_HDR_BG2)
-        c.alignment = Alignment(textRotation=90, wrap_text=False,
-                                vertical="bottom", horizontal="center")
-
-    ws.row_dimensions[1].height = 110
-    ws.row_dimensions[2].height = 90
-
-    # Data rows from row 3
-    cols = [en for en, _ in _PIVOT_COLUMNS]
-    for ri, row in enumerate(event_rows, start=3):
-        ev_type = row.get("event_type", "")
+    # ── Data rows ─────────────────────────────────────────────────────────────
+    cols = [en for en, *_ in _PIVOT_COLUMNS]
+    for ri, row in enumerate(event_rows, start=2):
+        ev_type    = row.get("event_type", "")
         fill_color = _EVENT_FILL.get(ev_type)
+        fill       = PatternFill("solid", fgColor=fill_color) if fill_color else None
         for col, key in enumerate(cols, 1):
             val = row.get(key)
             if isinstance(val, dict):
                 val = str(val)
             cell = ws.cell(row=ri, column=col, value=val)
-            if fill_color:
-                cell.fill = PatternFill("solid", fgColor=fill_color)
+            if fill:
+                cell.fill = fill
 
-    # Freeze at row 3 (below both header rows)
-    ws.freeze_panes = "A3"
-    # Auto-filter on header row 2
-    ws.auto_filter.ref = f"A2:{get_column_letter(len(cols))}2"
+    # ── Freeze & filter ───────────────────────────────────────────────────────
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(cols))}1"
 
-    # Column widths: narrow for numeric, wider for text
-    _TEXT_COLS = {"series_group", "test_id", "topic", "label", "status",
-                  "event_type", "event_type_pl", "reject_reason_pl",
-                  "provider_error_message", "reject_family"}
-    for col, (en_name, _) in enumerate(_PIVOT_COLUMNS, 1):
-        ltr = get_column_letter(col)
-        ws.column_dimensions[ltr].width = 18 if en_name in _TEXT_COLS else 8
 
+# ── Derived view sheets ───────────────────────────────────────────────────────
 
 def add_dashboard_sheet(
     wb: Workbook,
@@ -278,27 +233,27 @@ def add_dashboard_sheet(
     rejection_rows: list[dict],
 ) -> None:
     ws = wb.create_sheet("01_Dashboard")
-    completed   = sum(1 for r in results if r.get("ok"))
-    failed      = len(results) - completed
-    total_dur   = sum(r.get("duration_seconds") or 0 for r in results)
-    total_tok   = sum((r.get("total_tokens") or 0) for r in results) or None
-    total_rej   = sum((r.get("n_rejected_attempts") or 0) for r in results)
+    completed  = sum(1 for r in results if r.get("ok"))
+    failed     = len(results) - completed
+    total_dur  = sum(r.get("duration_seconds") or 0 for r in results)
+    total_tok  = sum(r.get("total_tokens") or 0 for r in results) or None
+    total_rej  = sum(r.get("n_rejected_attempts") or 0 for r in results)
     total_rej_dur = sum((r.get("total_rejection_duration_s") or 0) for r in enriched_results)
-    has_diag    = any(r.get("n_batches") is not None for r in results)
-    n_batches_all = sum((r.get("n_batches") or 0) for r in results)
+    has_diag   = any(r.get("n_batches") is not None for r in results)
+    n_bat_all  = sum(r.get("n_batches") or 0 for r in results)
 
-    ws.cell(row=1, column=1, value="Quiz Test Series — Summary").font = Font(bold=True, size=12)
+    ws.cell(row=1, column=1, value="LLM Quiz — Test Series Summary").font = Font(bold=True, size=12)
     rows_data = [
         ("Generated at",              datetime.now().strftime("%Y-%m-%d %H:%M")),
         ("Total tests",               len(results)),
         ("Completed",                 completed),
         ("Failed",                    failed),
-        ("Success rate",              _pct(completed, len(results)) if results else NA),
-        ("Total duration (s)",        _round(total_dur, 1)),
+        ("Success rate [%]",          _pct(completed, len(results)) if results else NA),
+        ("Total duration [s]",        _round(total_dur, 1)),
         ("Total tokens (all batches)", total_tok if total_tok else NA),
-        ("Total API batches",         n_batches_all if has_diag else NA),
+        ("Total API batches",         n_bat_all if has_diag else NA),
         ("Total rejected attempts",   total_rej if has_diag else NA),
-        ("Rejection overhead (s)",    _round(total_rej_dur, 1) if has_diag else NA),
+        ("Rejection overhead [s]",    _round(total_rej_dur, 1) if has_diag else NA),
         ("Diagnostics available",     "yes" if has_diag else "no"),
     ]
     for i, (lbl, val) in enumerate(rows_data, start=3):
@@ -320,7 +275,6 @@ def add_testy_sheet(wb: Workbook, enriched_results: list[dict]) -> None:
     ]
     for col, h in enumerate(headers, 1):
         _hdr(ws, 1, col, h)
-
     for ri, r in enumerate(enriched_results, start=2):
         for col, h in enumerate(headers, 1):
             cell = ws.cell(row=ri, column=col, value=r.get(h, NA))
@@ -328,63 +282,57 @@ def add_testy_sheet(wb: Workbook, enriched_results: list[dict]) -> None:
                 cell.fill = PatternFill("solid", fgColor=_OK_BG)
             elif r.get("status") == "failed":
                 cell.fill = PatternFill("solid", fgColor=_FAIL_BG)
-
     ws.freeze_panes = "A2"
     _auto_width(ws)
 
 
 def add_podsumowania_sheet(wb: Workbook, results: list[dict]) -> None:
-    """Aggregated summaries per topic and per difficulty."""
     ws = wb.create_sheet("03_Podsumowania")
 
-    def _agg(rows: list[dict], group_key: str) -> list[dict]:
-        groups: dict[str, list] = defaultdict(list)
+    def _agg(rows, group_key):
+        groups = defaultdict(list)
         for r in rows:
             groups[r.get(group_key, NA)].append(r)
         out = []
         for key, items in sorted(groups.items()):
-            n = len(items)
-            ok = sum(1 for r in items if r.get("ok"))
-            durs = [r.get("duration_seconds") for r in items if r.get("duration_seconds") is not None]
-            toks = [r.get("total_tokens") for r in items if r.get("total_tokens") is not None]
-            rejs = [r.get("n_rejected_attempts") or 0 for r in items]
-            batches = [r.get("n_batches") or 0 for r in items]
+            n   = len(items)
+            ok  = sum(1 for r in items if r.get("ok"))
+            dur = [r.get("duration_seconds") for r in items if r.get("duration_seconds") is not None]
+            tok = [r.get("total_tokens") for r in items if r.get("total_tokens") is not None]
+            rej = [r.get("n_rejected_attempts") or 0 for r in items]
+            bat = [r.get("n_batches") or 0 for r in items]
             out.append({
                 group_key:          key,
                 "n_tests":          n,
                 "n_completed":      ok,
                 "success_rate_pct": _pct(ok, n),
-                "avg_duration_s":   _round(sum(durs) / len(durs)) if durs else NA,
-                "avg_tokens":       _round(sum(toks) / len(toks)) if toks else NA,
-                "avg_n_rejected":   _round(sum(rejs) / n),
-                "avg_n_batches":    _round(sum(batches) / n),
+                "avg_duration_s":   _round(sum(dur) / len(dur)) if dur else NA,
+                "avg_tokens":       _round(sum(tok) / len(tok)) if tok else NA,
+                "avg_n_rejected":   _round(sum(rej) / n),
+                "avg_n_batches":    _round(sum(bat) / n),
             })
         return out
 
-    # Section: per topic
     ws.cell(row=1, column=1, value="Per topic").font = Font(bold=True, size=11)
-    topic_headers = ["topic", "n_tests", "n_completed", "success_rate_pct",
-                     "avg_duration_s", "avg_tokens", "avg_n_rejected", "avg_n_batches"]
-    for col, h in enumerate(topic_headers, 1):
+    th = ["topic", "n_tests", "n_completed", "success_rate_pct",
+          "avg_duration_s", "avg_tokens", "avg_n_rejected", "avg_n_batches"]
+    for col, h in enumerate(th, 1):
         _hdr(ws, 2, col, h)
-    topic_rows = _agg(results, "topic")
-    _write_rows(ws, topic_headers, topic_rows, start_row=3)
+    tr = _agg(results, "topic")
+    _write_rows(ws, th, tr, start_row=3)
 
-    # Section: per difficulty (below topic table with gap)
-    gap_row = 3 + len(topic_rows) + 2
-    ws.cell(row=gap_row, column=1, value="Per difficulty").font = Font(bold=True, size=11)
-    diff_headers = ["difficulty", "n_tests", "n_completed", "success_rate_pct",
-                    "avg_duration_s", "avg_tokens", "avg_n_rejected", "avg_n_batches"]
-    for col, h in enumerate(diff_headers, 1):
-        _hdr(ws, gap_row + 1, col, h)
-    diff_rows = _agg(results, "difficulty")
-    _write_rows(ws, diff_headers, diff_rows, start_row=gap_row + 2)
-
+    gap = 3 + len(tr) + 2
+    ws.cell(row=gap, column=1, value="Per difficulty").font = Font(bold=True, size=11)
+    dh = ["difficulty", "n_tests", "n_completed", "success_rate_pct",
+          "avg_duration_s", "avg_tokens", "avg_n_rejected", "avg_n_batches"]
+    for col, h in enumerate(dh, 1):
+        _hdr(ws, gap + 1, col, h)
+    dr = _agg(results, "difficulty")
+    _write_rows(ws, dh, dr, start_row=gap + 2)
     _auto_width(ws)
 
 
 def add_bledy_per_test_sheet(wb: Workbook, rejection_rows: list[dict], results: list[dict]) -> None:
-    """Per-test rejection summary — only tests with at least one rejection."""
     ws = wb.create_sheet("04_Bledy_per_test")
     headers = [
         "test_id", "topic", "difficulty",
@@ -395,23 +343,21 @@ def add_bledy_per_test_sheet(wb: Workbook, rejection_rows: list[dict], results: 
     for col, h in enumerate(headers, 1):
         _hdr(ws, 1, col, h)
 
-    # Build lookup: test_id → topic/difficulty
     meta = {r.get("test_id", ""): r for r in results}
-
     groups: dict[str, list] = defaultdict(list)
     for r in rejection_rows:
         groups[r.get("test_id", NA)].append(r)
 
     rows_out = []
-    for test_id, items in sorted(groups.items()):
-        decisions    = Counter(r.get("decision", NA) for r in items)
-        error_types  = Counter(r.get("error_type", NA) for r in items)
+    for tid, items in sorted(groups.items()):
+        decisions   = Counter(r.get("decision", NA) for r in items)
+        error_types = Counter(r.get("error_type", NA) for r in items)
         durs = [r.get("attempt_duration_seconds") for r in items if r.get("attempt_duration_seconds") is not None]
-        result_meta  = meta.get(test_id, {})
+        rm   = meta.get(tid, {})
         rows_out.append({
-            "test_id":                    test_id,
-            "topic":                      result_meta.get("topic", NA),
-            "difficulty":                 result_meta.get("difficulty", NA),
+            "test_id":                    tid,
+            "topic":                      rm.get("topic", NA),
+            "difficulty":                 rm.get("difficulty", NA),
             "n_rejections":               len(items),
             "dominant_decision":          decisions.most_common(1)[0][0] if decisions else NA,
             "dominant_error_type":        error_types.most_common(1)[0][0] if error_types else NA,
@@ -421,19 +367,16 @@ def add_bledy_per_test_sheet(wb: Workbook, rejection_rows: list[dict], results: 
             "n_reduce":                   decisions.get("reduce", 0),
             "n_retry":                    decisions.get("retry", 0),
         })
-
     for ri, r in enumerate(rows_out, start=2):
         for col, h in enumerate(headers, 1):
             cell = ws.cell(row=ri, column=col, value=r.get(h, NA))
             if r.get("n_halt", 0) > 0:
                 cell.fill = PatternFill("solid", fgColor=_FAIL_BG)
-
     ws.freeze_panes = "A2"
     _auto_width(ws)
 
 
 def add_kategorie_bledow_sheet(wb: Workbook, rejection_rows: list[dict]) -> None:
-    """Aggregated rejection counts by decision × error_type."""
     ws = wb.create_sheet("05_Kategorie_bledow")
     headers = [
         "decision", "error_type", "n_attempts",
@@ -444,10 +387,9 @@ def add_kategorie_bledow_sheet(wb: Workbook, rejection_rows: list[dict]) -> None
 
     groups: dict[tuple, list] = defaultdict(list)
     for r in rejection_rows:
-        key = (r.get("decision", NA), r.get("error_type", NA))
-        groups[key].append(r)
+        groups[(r.get("decision", NA), r.get("error_type", NA))].append(r)
 
-    total_rej = len(rejection_rows)
+    total = len(rejection_rows)
     rows_out = []
     for (decision, error_type), items in sorted(groups.items()):
         durs  = [x.get("attempt_duration_seconds") for x in items if x.get("attempt_duration_seconds") is not None]
@@ -458,16 +400,14 @@ def add_kategorie_bledow_sheet(wb: Workbook, rejection_rows: list[dict]) -> None
             "n_attempts":            len(items),
             "mean_duration_s":       _round(sum(durs) / len(durs)) if durs else NA,
             "mean_batch_size":       _round(sum(sizes) / len(sizes), 1) if sizes else NA,
-            "pct_of_all_rejections": _pct(len(items), total_rej) if total_rej else NA,
+            "pct_of_all_rejections": _pct(len(items), total) if total else NA,
         })
-
     _write_rows(ws, headers, rows_out)
     ws.freeze_panes = "A2"
     _auto_width(ws)
 
 
 def add_batche_srednie_sheet(wb: Workbook, batch_rows: list[dict], results: list[dict]) -> None:
-    """Average batch statistics per test."""
     ws = wb.create_sheet("06_Batche_srednie")
     headers = [
         "test_id", "topic", "difficulty",
@@ -479,23 +419,22 @@ def add_batche_srednie_sheet(wb: Workbook, batch_rows: list[dict], results: list
     for col, h in enumerate(headers, 1):
         _hdr(ws, 1, col, h)
 
-    meta = {r.get("test_id", ""): r for r in results}
-
+    meta   = {r.get("test_id", ""): r for r in results}
     groups: dict[str, list] = defaultdict(list)
     for b in batch_rows:
         groups[b.get("test_id", NA)].append(b)
 
     rows_out = []
-    for test_id, items in sorted(groups.items()):
+    for tid, items in sorted(groups.items()):
         def _avg(key):
             vals = [x.get(key) for x in items if x.get(key) is not None]
             return _round(sum(vals) / len(vals)) if vals else NA
 
-        result_meta = meta.get(test_id, {})
+        rm = meta.get(tid, {})
         rows_out.append({
-            "test_id":              test_id,
-            "topic":                result_meta.get("topic", NA),
-            "difficulty":           result_meta.get("difficulty", NA),
+            "test_id":              tid,
+            "topic":                rm.get("topic", NA),
+            "difficulty":           rm.get("difficulty", NA),
             "n_batches":            len(items),
             "avg_batch_size":       _avg("accepted_batch_size"),
             "avg_duration_s":       _avg("attempt_duration_seconds"),
@@ -506,14 +445,12 @@ def add_batche_srednie_sheet(wb: Workbook, batch_rows: list[dict], results: list
             "avg_prompt_chars":     _avg("total_prompt_chars"),
             "avg_guardrail_chars":  _avg("guardrail_chars"),
         })
-
     _write_rows(ws, headers, rows_out)
     ws.freeze_panes = "A2"
     _auto_width(ws)
 
 
 def add_guardrail_sheet(wb: Workbook, batch_rows: list[dict]) -> None:
-    """Per-batch guardrail context size (only rows where guardrail was active)."""
     ws = wb.create_sheet("07_Guardrail")
     headers = [
         "test_id", "batch_number",
@@ -569,9 +506,7 @@ def add_raw_batches_sheet(wb: Workbook, batch_rows: list[dict]) -> None:
 
 def add_quality_issues_sheet(wb: Workbook, quality_rows: list[dict]) -> None:
     ws = wb.create_sheet("10_Quality_issues")
-    headers = [
-        "test_id", "issue_type", "question_index", "question_text", "detail",
-    ]
+    headers = ["test_id", "issue_type", "question_index", "question_text", "detail"]
     for col, h in enumerate(headers, 1):
         _hdr(ws, 1, col, h)
     _write_rows(ws, headers, quality_rows)
@@ -581,10 +516,15 @@ def add_quality_issues_sheet(wb: Workbook, quality_rows: list[dict]) -> None:
 
 def add_slownik_kolumn_sheet(wb: Workbook) -> None:
     ws = wb.create_sheet("11_Slownik_kolumn")
-    _hdr(ws, 1, 1, "Kolumna")
-    _hdr(ws, 1, 2, "Opis")
-    for ri, (col, desc) in enumerate(COLUMN_DICT, start=2):
-        ws.cell(row=ri, column=1, value=col)
-        ws.cell(row=ri, column=2, value=desc)
-    ws.column_dimensions["A"].width = 32
-    ws.column_dimensions["B"].width = 62
+    _hdr(ws, 1, 1, "Kolumna (EN snake_case)")
+    _hdr(ws, 1, 2, "Opis PL")
+    _hdr(ws, 1, 3, "Grupa")
+    for ri, (en, pl, _, grp, _w) in enumerate(_PIVOT_COLUMNS, start=2):
+        ws.cell(row=ri, column=1, value=en)
+        ws.cell(row=ri, column=2, value=pl)
+        c = ws.cell(row=ri, column=3, value=grp)
+        c.fill = PatternFill("solid", fgColor=_GRP[grp])
+    ws.column_dimensions["A"].width = 38
+    ws.column_dimensions["B"].width = 32
+    ws.column_dimensions["C"].width = 12
+    ws.freeze_panes = "A2"
