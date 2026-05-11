@@ -124,9 +124,9 @@ def _build_event_rows(
         tgt    = result.get("count_requested") or 0
         acc    = result.get("count_generated") or 0
         ttok   = result.get("total_tokens")
-        has_r  = len(rej_by_test[tid]) > 0
 
-        # Test-level context — denormalized onto every event row
+        # Test-level context — denormalized onto every event row.
+        # has_rejection is NOT here: it's event-level (True only for rejected_attempt rows).
         base = {
             "series_group":          run_id,
             "run_datetime":          run_datetime,
@@ -145,7 +145,6 @@ def _build_event_rows(
             "n_batches":             result.get("n_batches"),
             "n_rejected_attempts":   result.get("n_rejected_attempts"),
             "min_batch_size":        result.get("min_batch_size"),
-            "has_rejection":         has_r,
             "total_tokens_known":    (ttok is not None and ttok > 0) if ttok is not None else None,
             "tokens_per_target_q":   _round(ttok / tgt, 1) if (ttok and tgt) else None,
             "rejected_time_s_detailed": _round(rej_total_time[tid]) or None,
@@ -174,6 +173,7 @@ def _build_event_rows(
 
                 event_rows.append({
                     **base,
+                    "has_rejection":          True,   # event-level: this row IS a rejection
                     "event_type":             "rejected_attempt",
                     "event_type_pl":          _EVENT_TYPE_PL["rejected_attempt"],
                     "event_seq":              event_seq,
@@ -237,6 +237,7 @@ def _build_event_rows(
 
                 event_rows.append({
                     **base,
+                    "has_rejection":          False,  # event-level: this row is NOT a rejection
                     "event_type":             "accepted_batch",
                     "event_type_pl":          _EVENT_TYPE_PL["accepted_batch"],
                     "event_seq":              event_seq,
@@ -290,6 +291,7 @@ def _build_event_rows(
             event_seq += 1
             event_rows.append({
                 **base,
+                "has_rejection":  False,
                 "event_type":    "quality_issue",
                 "event_type_pl": _EVENT_TYPE_PL["quality_issue"],
                 "event_seq":     event_seq,
@@ -318,6 +320,7 @@ def _build_event_rows(
         if not result.get("ok") and result.get("error") and event_seq == 0:
             event_rows.append({
                 **base,
+                "has_rejection":  False,
                 "event_type":    "generation_error",
                 "event_type_pl": _EVENT_TYPE_PL["generation_error"],
                 "event_seq":     1,
