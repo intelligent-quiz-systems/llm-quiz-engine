@@ -98,3 +98,82 @@ def estimate_token_count(text: str) -> int:
         return 0
     
     return math.ceil(len(stripped) / 4)
+
+def split_into_sections(text: str) -> list[tuple[str, str]]:
+    stripped = normalize_text(text)
+    if not stripped:
+        return []
+
+    raw_sections = re.split(r"\n\s*\n+", stripped)
+    sections: list[tuple[str, str]] = []
+
+    for index, section_text in enumerate(raw_sections, start=1):
+        section_text = section_text.strip()
+        if not section_text:
+            continue
+
+        first_line = section_text.splitlines()[0].strip()
+        if 0 < len(first_line) <= 80:
+            section_label = f"section_{index}: {first_line}"
+        else:
+            section_label = f"section_{index}"
+
+        sections.append((section_label, section_text))
+
+    return sections
+
+
+def split_section_into_token_windows(
+    section_text: str,
+    max_tokens: int = DEFAULT_CHUNK_MAX_TOKENS,
+    overlap_tokens: int = DEFAULT_CHUNK_OVERLAP_TOKENS,
+) -> list[str]:
+    words = section_text.split()
+    if not words:
+        return []
+
+    approx_words_per_token = 0.75
+    window_size = max(1, int(max_tokens * approx_words_per_token))
+    overlap_size = min(window_size - 1, int(overlap_tokens * approx_words_per_token))
+    step = max(1, window_size - overlap_size)
+
+    chunks: list[str] = []
+    start = 0
+
+    while start < len(words):
+        end = start + window_size
+        chunk_words = words[start:end]
+        if not chunk_words:
+            break
+
+        chunks.append(" ".join(chunk_words))
+
+        if end >= len(words):
+            break
+
+        start += step
+
+    return chunks
+
+
+def validate_sources(
+    sources: list[RAGSource],
+    max_sources: int = MAX_RAG_SOURCES,
+    max_source_tokens: int = DEFAULT_MAX_SOURCE_TOKENS,
+) -> None:
+    if not sources:
+        raise ValueError("Brak źródeł do zbudowania RAG.")
+
+    if len(sources) > max_sources:
+        raise ValueError(f"Maksymalnie {max_sources} źródła na jedno generowanie quizu.")
+
+    for source in sources:
+        if not source.text.strip():
+            raise ValueError(f"Źródło '{source.source_name}' nie zawiera tekstu po ekstrakcji.")
+
+        source_token_count = estimate_token_count(source.text)
+        if source_token_count > max_source_tokens:
+            raise ValueError(
+                f"Źródło '{source.source_name}' przekracza limit tokenów po ekstrakcji: "
+                f"{source_token_count} > {max_source_tokens}."
+            )
