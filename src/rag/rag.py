@@ -177,3 +177,90 @@ def validate_sources(
                 f"Źródło '{source.source_name}' przekracza limit tokenów po ekstrakcji: "
                 f"{source_token_count} > {max_source_tokens}."
             )
+def build_chunks(
+    sources: list[RAGSource],
+    chunk_max_tokens: int = DEFAULT_CHUNK_MAX_TOKENS,
+    chunk_overlap_tokens: int = DEFAULT_CHUNK_OVERLAP_TOKENS,
+) -> list[RAGChunk]:
+    all_chunks: list[RAGChunk] = []
+
+    for source in sources:
+        sections = split_into_sections(source.text)
+
+        for section_index, (section_label, section_text) in enumerate(sections, start=1):
+            chunk_texts = split_section_into_token_windows(
+                section_text=section_text,
+                max_tokens=chunk_max_tokens,
+                overlap_tokens=chunk_overlap_tokens,
+            )
+
+            for chunk_index, chunk_text in enumerate(chunk_texts, start=1):
+                token_count = estimate_token_count(chunk_text)
+                chunk_id = f"{source.source_id}:{section_index}:{chunk_index}"
+
+                all_chunks.append(
+                    RAGChunk(
+                        chunk_id=chunk_id,
+                        source_id=source.source_id,
+                        source_type=source.source_type,
+                        source_name=source.source_name,
+                        section_label=section_label,
+                        token_count=token_count,
+                        text=chunk_text,
+                    )
+                )
+
+    return all_chunks
+
+
+def group_chunks_for_coverage(chunks: list[RAGChunk]) -> list[list[RAGChunk]]:
+    grouped: dict[tuple[str, str], list[RAGChunk]] = {}
+
+    for chunk in chunks:
+        key = (chunk.source_id, chunk.section_label)
+        grouped.setdefault(key, []).append(chunk)
+
+    return list(grouped.values())
+
+
+def build_batches(
+    chunks: list[RAGChunk],
+    max_context_tokens: int = RAG_CONTEXT_MAX_TOKENS,
+    max_chunks_per_batch: int = DEFAULT_MAX_CHUNKS_PER_BATCH,
+) -> tuple[list[RAGBatch], list[RAGBatchLog]]:
+    if not chunks:
+        return [], []
+
+    groups = group_chunks_for_coverage(chunks)
+    batches: list[RAGBatch] = []
+    logs: list[RAGBatchLog] = []
+
+    batch_index = 1
+    current_batch = RAGBatch(batch_id=f"batch_{batch_index}")
+
+    for round_items in zip_longest(*groups):
+        for chunk in round_items:
+            if chunk is None:
+                continue
+
+            if chunk.token_count > max_context_tokens:
+                continue
+
+            would_exceed_tokens = current_batch.total_tokens + chunk.token_count > max_context_tokens
+            would_exceed_chunk_count = len(current_batch.chunks) >= max_chunks_per_batch
+
+            if (would_exceed_tokens or would_exceed_chunk_count) and current_batch.chunks:
+                batches.append(current_batch)
+                logs.append(build_batch_log(current_batch))
+
+                batch_index += 1
+                current_batch = RAGBatch(batch_id=f"batch_{batch_index}")
+
+            current_batch.chunks.append(chunk)
+            current_batch.total_tokens += chunk.token_count
+
+    if current_batch.chunks:
+        batches.append(current_batch)
+        logs.append(build_batch_log(current_batch))
+
+    return batches, logs
