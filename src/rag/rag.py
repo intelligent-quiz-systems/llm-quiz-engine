@@ -264,3 +264,66 @@ def build_batches(
         logs.append(build_batch_log(current_batch))
 
     return batches, logs
+
+def build_batch_log(batch: RAGBatch) -> RAGBatchLog:
+    return RAGBatchLog(
+        batch_id=batch.batch_id,
+        chunk_ids=[chunk.chunk_id for chunk in batch.chunks],
+        source_names=sorted({chunk.source_name for chunk in batch.chunks}),
+        total_tokens=batch.total_tokens,
+        chunk_count=len(batch.chunks),
+    )
+
+
+def build_rag_pipeline(
+    sources: list[RAGSource],
+    chunk_max_tokens: int = DEFAULT_CHUNK_MAX_TOKENS,
+    chunk_overlap_tokens: int = DEFAULT_CHUNK_OVERLAP_TOKENS,
+    max_context_tokens: int = RAG_CONTEXT_MAX_TOKENS,
+    max_source_tokens: int = DEFAULT_MAX_SOURCE_TOKENS,
+    max_chunks_per_batch: int = DEFAULT_MAX_CHUNKS_PER_BATCH,
+) -> tuple[list[RAGChunk], list[RAGBatch], list[RAGBatchLog]]:
+    validate_sources(
+        sources=sources,
+        max_sources=MAX_RAG_SOURCES,
+        max_source_tokens=max_source_tokens,
+    )
+
+    chunks = build_chunks(
+        sources=sources,
+        chunk_max_tokens=chunk_max_tokens,
+        chunk_overlap_tokens=chunk_overlap_tokens,
+    )
+
+    batches, logs = build_batches(
+        chunks=chunks,
+        max_context_tokens=max_context_tokens,
+        max_chunks_per_batch=max_chunks_per_batch,
+    )
+
+    return chunks, batches, logs
+
+
+def serialize_rag_logs(logs: Iterable[RAGBatchLog]) -> list[dict]:
+    return [asdict(log) for log in logs]
+
+
+def serialize_chunks(chunks: Iterable[RAGChunk]) -> list[dict]:
+    return [asdict(chunk) for chunk in chunks]
+
+
+def serialize_batches(batches: Iterable[RAGBatch]) -> list[dict]:
+    serialized: list[dict] = []
+
+    for batch in batches:
+        serialized.append(
+            {
+                "batch_id": batch.batch_id,
+                "total_tokens": batch.total_tokens,
+                "chunk_count": len(batch.chunks),
+                "chunk_ids": [chunk.chunk_id for chunk in batch.chunks],
+                "context_text": batch.context_text,
+            }
+        )
+
+    return serialized
