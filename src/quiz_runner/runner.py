@@ -24,7 +24,10 @@ def _capture_stdout(log_path: Path):
 
     class _Tee:
         def write(self, data: str) -> None:
-            old.write(data)
+            try:
+                old.write(data)
+            except UnicodeEncodeError:
+                old.write(data.encode("ascii", errors="replace").decode("ascii"))
             buf.write(data)
 
         def flush(self) -> None:
@@ -150,6 +153,11 @@ def _save_diagnostics(test_dir: Path, diagnostics: dict) -> None:
     if gen_error:
         data = gen_error if isinstance(gen_error, dict) else {"error": str(gen_error)}
         _save_json(test_dir / "provider_error.json", data)
+
+    # quality_issues.json — only written when quality checks flagged issues
+    quality_issues = diagnostics.get("quality_issues", [])
+    if quality_issues:
+        _save_json(test_dir / "quality_issues.json", {"issues": quality_issues})
 
 
 def run_single_test(
