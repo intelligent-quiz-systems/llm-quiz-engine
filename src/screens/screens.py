@@ -1,16 +1,30 @@
 import math
 import time
+from urllib.parse import quote
 from enum import Enum
 
 import streamlit as st
-import streamlit.components.v1 as components
+from streamlit_autorefresh import st_autorefresh
 from validations.validate_quiz import validate_quiz
+from datetime import datetime, timezone
+from uuid import uuid4 
+from history.history import append_attempt, load_history
 
 QUIZ_PAGE_SIZE = 3
 OPTION_LABELS = ["A", "B", "C", "D", "E", "F"]
-DEFAULT_QUESTION_COUNT = 5
-DEFAULT_TIME_LIMIT_MINUTES = 10
+DEFAULT_QUESTION_COUNT = 10
+DEFAULT_TIME_LIMIT_MINUTES = 20
 DEFAULT_TOPIC = "Podstawy Pythona"
+MAX_QUESTION_COUNT = 10
+MAX_TIME_LIMIT_MINUTES = 60
+MAX_SOURCE_FILE_SIZE_BYTES = 10 * 1024 * 1024
+MIN_EXTRACTED_SOURCE_CHARS = 500
+
+
+def format_size_label(size_bytes: int) -> str:
+    if size_bytes % (1024 * 1024) == 0:
+        return f"{size_bytes // (1024 * 1024)} MB"
+    return f"{size_bytes // 1024} KB"
 
 
 class QuizDifficulty(Enum):
@@ -88,6 +102,14 @@ def init_state():
         "answers": {},
         "timeout_happened": False,
         "config": None,
+        "quiz_started_at": None,
+        "history_saved": False,
+        "topic_input": DEFAULT_TOPIC,
+        "pending_topic_input": None,
+        "source_topic_file_id": None,
+        "quiz_source_mode": "Temat quizu",
+        "prev_quiz_source_mode": "Temat quizu",
+        "source_uploader_version": 0,
     }
 
     for key, value in defaults.items():
@@ -100,7 +122,7 @@ def inject_css():
         """
         <style>
         .block-container {
-            padding-top: 1.2rem;
+            padding-top: 1rem;
         }
 
         h1 {
@@ -163,14 +185,132 @@ def inject_css():
             text-align: center;
         }
 
-        /* ukryty przycisk do odświeżania timera */
-        div[data-testid="stButton"] button[kind="secondary"][data-refresh-timer="true"] {
+        /* Hide Streamlit default helper text under file uploader */
+        [data-testid="stFileUploader"] small {
             display: none !important;
+        }
+        [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInstructions"] > div:last-child {
+            display: none !important;
+        }
+        [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzoneInstructions"] p:last-child {
+            display: none !important;
+        }
+
+        /* Replace default uploader button text with Polish label */
+        [data-testid="stFileUploader"] button div[data-testid="stMarkdownContainer"] p {
+            visibility: hidden;
+            position: relative;
+        }
+
+        [data-testid="stFileUploader"] button div[data-testid="stMarkdownContainer"] p::after {
+            content: "Załaduj";
+            visibility: visible;
+            position: absolute;
+            left: 0;
+            top: 0;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
+
+
+def inject_browser_scroll_on_nav():
+    html_doc = """
+    <!doctype html>
+    <html>
+      <body>
+        <script>
+          (function () {
+              const parentDoc = window.parent.document;
+
+              function forceTopScroll() {
+                  const win = window.parent;
+
+                  try {
+                      win.scrollTo({ top: 0, left: 0, behavior: "auto" });
+                  } catch (e) {}
+
+                  const selectors = [
+                      '[data-testid="stAppViewContainer"]',
+                      '[data-testid="stMain"]',
+                      'section.main',
+                      '.main',
+                      'body',
+                      'html'
+                  ];
+
+                  selectors.forEach((selector) => {
+                      const el = parentDoc.querySelector(selector);
+                      if (el) {
+                          try {
+                              el.scrollTop = 0;
+                              el.scrollTo({ top: 0, left: 0, behavior: "auto" });
+                          } catch (e) {}
+                      }
+                  });
+
+                  if (parentDoc.documentElement) {
+                      parentDoc.documentElement.scrollTop = 0;
+                  }
+
+                  if (parentDoc.body) {
+                      parentDoc.body.scrollTop = 0;
+                  }
+              }
+
+              function bindScroll(buttonText) {
+                  const buttons = Array.from(parentDoc.querySelectorAll("button"));
+                  const target = buttons.find((btn) => {
+                      const text = (btn.innerText || btn.textContent || "").trim();
+                      return text === buttonText;
+                  });
+
+                  if (!target) return;
+                  if (target.dataset.scrollBound === "1") return;
+
+                  target.dataset.scrollBound = "1";
+
+                  target.addEventListener(
+                      "click",
+                      function () {
+                          forceTopScroll();
+                          requestAnimationFrame(forceTopScroll);
+                          setTimeout(forceTopScroll, 0);
+                          setTimeout(forceTopScroll, 20);
+                          setTimeout(forceTopScroll, 60);
+                          setTimeout(forceTopScroll, 120);
+                      },
+                      true
+                  );
+              }
+
+              function bindAll() {
+                  [
+                      "Dalej",
+                      "Wstecz",
+                      "Zakończ quiz",
+                      "Resetuj quiz",
+                      "Nowy quiz",
+                      "Generuj quiz"
+                  ].forEach(bindScroll);
+              }
+
+              bindAll();
+              setTimeout(bindAll, 150);
+              setTimeout(bindAll, 400);
+              setTimeout(bindAll, 800);
+          })();
+        </script>
+      </body>
+    </html>
+    """
+
+    st.iframe(
+        src=f"data:text/html;charset=utf-8,{quote(html_doc)}",
+        height=1,
+    )
+
 
 def difficulty_label(value):
     if isinstance(value, QuizDifficulty):
@@ -181,11 +321,46 @@ def difficulty_label(value):
 def render_config_screen():
     st.title("Generator quizu")
 
-    topic = st.text_input("Temat quizu", DEFAULT_TOPIC)
+    pending_topic = st.session_state.get("pending_topic_input")
+    if pending_topic:
+        st.session_state.topic_input = pending_topic
+        st.session_state.pending_topic_input = None
+
+    source_mode = st.radio(
+        "Źródło quizu",
+        options=["Temat quizu", "Plik"],
+        key="quiz_source_mode",
+        horizontal=True,
+    )
+
+    previous_mode = st.session_state.get("prev_quiz_source_mode")
+    if previous_mode != source_mode:
+        if source_mode == "Temat quizu":
+            # file_uploader cannot be cleared by direct assignment;
+            # bumping key forces a fresh, empty uploader instance.
+            st.session_state.source_uploader_version += 1
+        st.session_state.prev_quiz_source_mode = source_mode
+        st.rerun()
+
+    source_file = None
+    if source_mode == "Plik":
+        source_file = st.file_uploader(
+            f"Plik źródłowy (.txt lub .pdf, max {format_size_label(MAX_SOURCE_FILE_SIZE_BYTES)})",
+            type=["txt", "pdf"],
+            help="Po załadowaniu pliku temat quizu zostanie wykryty automatycznie przez LLM.",
+            key=f"source_file_input_{st.session_state.source_uploader_version}",
+        )
+
+        if source_file is not None and source_file.size > MAX_SOURCE_FILE_SIZE_BYTES:
+            st.error(
+                f"Plik jest za duży. Maksymalny rozmiar to {format_size_label(MAX_SOURCE_FILE_SIZE_BYTES)}."
+            )
+
+    topic = st.text_input("Temat quizu", key="topic_input")
     question_count = st.number_input(
         "Liczba pytań",
         min_value=1,
-        max_value=20,
+        max_value=MAX_QUESTION_COUNT,
         value=DEFAULT_QUESTION_COUNT,
         step=1,
     )
@@ -198,15 +373,20 @@ def render_config_screen():
     time_limit = st.number_input(
         "Limit czasu (minuty)",
         min_value=1,
-        max_value=120,
+        max_value=MAX_TIME_LIMIT_MINUTES,
         value=DEFAULT_TIME_LIMIT_MINUTES,
         step=1,
     )
 
     submitted = st.button("Generuj quiz", type="primary")
 
+    inject_browser_scroll_on_nav()
+    render_history_preview()
+
     return {
         "submitted": submitted,
+        "source_mode": source_mode,
+        "source_file": source_file,
         "topic": topic,
         "question_count": int(question_count),
         "difficulty": difficulty,
@@ -237,7 +417,8 @@ def count_answered_questions(quiz):
 def _prepare_widget_value(question_index: int):
     widget_key = f"widget_q_{question_index}"
     saved_value = st.session_state.answers.get(question_index)
-    st.session_state[widget_key] = saved_value
+    if widget_key not in st.session_state:
+        st.session_state[widget_key] = saved_value
 
 
 def _persist_widget_value(question_index: int):
@@ -255,38 +436,13 @@ def reset_quiz_state():
     st.session_state.answers = {}
     st.session_state.current_page = 0
     st.session_state.timeout_happened = False
+    st.session_state.quiz_started_at = None
+    st.session_state.history_saved = False
+
 
     keys_to_remove = [k for k in st.session_state.keys() if k.startswith("widget_q_")]
     for key in keys_to_remove:
         del st.session_state[key]
-
-
-def render_timer_autorefresh_button():
-    # przycisk robi rerun aplikacji, ale zachowuje session_state
-    st.button("refresh_timer_hidden", key="refresh_timer_hidden_btn")
-
-
-def auto_refresh_quiz():
-    if st.session_state.app_step != "quiz":
-        return
-
-    components.html(
-        """
-        <script>
-        const clickRefreshButton = () => {
-            const root = window.parent.document;
-            const buttons = Array.from(root.querySelectorAll('button'));
-            const target = buttons.find(btn => btn.innerText && btn.innerText.trim() === 'refresh_timer_hidden');
-            if (target) {
-                target.click();
-            }
-        };
-
-        setTimeout(clickRefreshButton, 1000);
-        </script>
-        """,
-        height=0,
-    )
 
 
 def render_sidebar_timer():
@@ -329,14 +485,14 @@ def render_sidebar_status(quiz, config):
 
 
 def render_quiz_screen(quiz, config):
+    st_autorefresh(interval=1000, key="quiz_timer")
+
     is_valid, error_message = validate_quiz(quiz)
     if not is_valid:
         st.error(f"Niepoprawny format quizu: {error_message}")
         st.stop()
 
     start_timer(config.get("time_limit", DEFAULT_TIME_LIMIT_MINUTES))
-    render_timer_autorefresh_button()
-    auto_refresh_quiz()
 
     questions = quiz["questions"]
     render_sidebar_status(quiz, config)
@@ -388,6 +544,8 @@ def render_quiz_screen(quiz, config):
             st.session_state.app_step = "results"
             st.rerun()
 
+    inject_browser_scroll_on_nav()
+
 
 def calculate_score(quiz):
     score = 0
@@ -401,6 +559,27 @@ def calculate_score(quiz):
 
     return score
 
+def build_history_entry(quiz, config, score):
+    total = len(quiz.get("questions", []))
+    answered = count_answered_questions(quiz)
+    started_at = st.session_state.quiz_started_at or time.time()
+    finished_at = time.time()
+    duration_seconds = max(0, int(finished_at - started_at))
+
+    return {
+        "attempt_id": str(uuid4()),
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "topic": quiz.get("topic") or quiz.get("quiz_title", "Quiz"),
+        "difficulty": difficulty_label(config.get("difficulty")),
+        "question_count": total,
+        "answered_count": answered,
+        "score": score,
+        "max_score": total,
+        "percent": round((score / total) * 100, 2) if total > 0 else 0.0,
+        "time_limit_minutes": config.get("time_limit", DEFAULT_TIME_LIMIT_MINUTES),
+        "duration_seconds": duration_seconds,
+        "timed_out": bool(st.session_state.timeout_happened),
+    }
 
 def render_results_screen(quiz, config):
     is_valid, error_message = validate_quiz(quiz)
@@ -412,6 +591,10 @@ def render_results_screen(quiz, config):
 
     score = calculate_score(quiz)
     total = len(quiz["questions"])
+
+    if not st.session_state.history_saved:
+        append_attempt(build_history_entry(quiz, config, score))
+        st.session_state.history_saved = True 
 
     with st.sidebar:
         st.header("Wyniki")
@@ -487,3 +670,20 @@ def render_results_screen(quiz, config):
             reset_quiz_state()
             st.session_state.app_step = "config"
             st.rerun()
+
+    inject_browser_scroll_on_nav()
+
+def render_history_preview():
+    history = load_history()
+
+    if not history:
+        return
+
+    st.subheader("Ostatnie wyniki")
+
+    for entry in history[:5]:
+        st.write(
+            f"{entry['topic']} | {entry['score']}/{entry['max_score']} "
+            f"({entry['percent']}%) | {entry['difficulty']} | "
+            f"{entry['finished_at'][:19].replace('T', ' ')}"
+        )
