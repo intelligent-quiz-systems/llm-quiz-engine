@@ -87,7 +87,36 @@ def generate_quiz(
         print("LLM error:", e)
         return None
 
+def generate_hint(
+    question: str,
+    options: list[str],
+    correct_answer: str,
+    context: str | None = None
+) -> str | None:
+    """
+    Generuje jedną edukacyjną podpowiedź dla gracza.
+    Podpowiedź uwzględnia kontekst źródłowy (jeśli istnieje).
+    """
+    manager = PromptManager()
 
+    built = manager.build_from_template(
+        prompt_name="hint_generation",
+        question=question,
+        options=", ".join(options) if options else "Brak opcji",
+        correct_answer=correct_answer,
+        context=context if context else "Brak dodatkowego kontekstu źródłowego."
+    )
+
+    if not built:
+        return "Nie udało się wygenerować podpowiedzi."
+
+    try:
+        hint_text = run_prompt(built["system"], built["user"], None)
+        return hint_text.strip() if hint_text else None
+    except Exception as e:
+        print(f"Błąd podczas generowania podpowiedzi: {e}")
+        return "Nie udało się wygenerować podpowiedzi w tej chwili."
+    
 if __name__ == "__main__":
     quiz = generate_quiz(
         topic="Postawy pythona",
