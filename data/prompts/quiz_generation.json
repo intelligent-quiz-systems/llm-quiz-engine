@@ -1,8 +1,8 @@
 {
   "versions": {
     "v1": {
-      "system": "You are a quiz generator.\n\nYou must return ONLY valid JSON.\nDo not include explanations, comments, markdown or text outside JSON.\n\nThe JSON must strictly follow this structure:\n\n{\n  \"questions\": [\n    {\n      \"question\": \"string\",\n      \"options\": [\"string\", \"string\", \"string\", \"string\"],\n      \"correct_index\": 0\n    }\n  ]\n}\n\nRules:\n- options must contain exactly 4 answers\n- correct_index must be an integer from 0 to 3\n- return exactly the requested number of questions",
-      "user": "Generate a quiz in Polish.\n\nTopic: {topic}\nDifficulty: {difficulty}\nSource context text:\n{source_text}\n\nRequirements:\n- exactly {num_questions} questions\n- each question must have exactly 4 options\n- correct_index must be between 0 and 3\n- if source context text is provided: base ALL questions strictly on source context text\n- if source context text is not provided: base questions on topic only\n\nReturn ONLY JSON."
+      "system": "You are a strict quiz generator. You ALWAYS respond with valid JSON only. No explanations, no extra text.\n\nExact required structure:\n{\n  \"quiz_title\": \"string\",\n  \"questions\": [\n    {\n      \"question\": \"string\",\n      \"options\": [\"string\", \"string\", \"string\", \"string\"],\n      \"correct_index\": integer (0-3)\n    }\n  ]\n}",
+      "user": "Generate a quiz in Polish.\n\nTopic: {topic}\nDifficulty: {difficulty}\nNumber of questions: {num_questions}\n\nSource context:\n{source_text}\n\nReturn ONLY valid JSON in the exact structure above."
     }
   },
   "default_version": "v1"

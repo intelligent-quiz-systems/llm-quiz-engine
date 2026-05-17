@@ -48,7 +48,7 @@ def generate_quiz(
     difficulty: str,
     num_questions: int,
     source_text: str | None = None
-) -> str | None:
+) -> dict | None:
     
     manager = PromptManager()
 
@@ -57,31 +57,34 @@ def generate_quiz(
         topic=topic,
         difficulty=difficulty,
         num_questions=num_questions,
-        source_text=source_text[:QUIZ_SOURCE_CONTEXT_CHARS] if source_text else "No source text provided."
-    )
+        source_text=source_text[:QUIZ_SOURCE_CONTEXT_CHARS] if source_text else "No source text provided.",
+        quiz_title=f"Quiz: {topic}"   # ← dodaj tę linię
+    )    
 
     if not built:
-        print("Błąd: nie udało się pobrać promptu quiz_generation")
+        print("Błąd: nie udało się pobrać promptu")
         return None
 
     try:
-        quiz_json = run_prompt(built["system"], built["user"], Quiz)
+        result = run_prompt(built["system"], built["user"], None)
 
-        print("\n===== RESULT QUIZ JSON =====")
-        print(quiz_json)
+        print("\n===== RAW LLM RESPONSE =====")
+        print(result)
 
-        quiz = Quiz.model_validate(quiz_json)
+        if isinstance(result, str):
+            import json
+            quiz_data = json.loads(result)
+        else:
+            quiz_data = result
 
-        formatted_quiz_json = json.dumps(quiz_json, indent=2, ensure_ascii=False)
+        # Fallback - dodajemy brakujące pola
+        if isinstance(quiz_data, dict):
+            if "quiz_title" not in quiz_data:
+                quiz_data["quiz_title"] = f"Quiz: {topic}"
+            if "questions" not in quiz_data:
+                quiz_data["questions"] = []
 
-        print("\n===== VALIDATED QUIZ JSON =====")
-        print(formatted_quiz_json)
-
-        return quiz_json
-
-    except ValidationError as e:
-        print("Validation error:", e)
-        return None
+        return quiz_data
 
     except Exception as e:
         print("LLM error:", e)
@@ -91,11 +94,11 @@ def generate_hint(
     question: str,
     options: list[str],
     correct_answer: str,
-    context: str | None = None
+    context: str | None = None,
+    hint_level: str = "easy"
 ) -> str | None:
     """
-    Generuje jedną edukacyjną podpowiedź dla gracza.
-    Podpowiedź uwzględnia kontekst źródłowy (jeśli istnieje).
+    Generuje jedną podpowiedź.
     """
     manager = PromptManager()
 
@@ -104,22 +107,24 @@ def generate_hint(
         question=question,
         options=", ".join(options) if options else "Brak opcji",
         correct_answer=correct_answer,
-        context=context if context else "Brak dodatkowego kontekstu źródłowego."
+        context=context if context else "Brak dodatkowego kontekstu źródłowego.",
+        hint_level=hint_level
     )
 
     if not built:
         return "Nie udało się wygenerować podpowiedzi."
 
     try:
-        hint_text = run_prompt(built["system"], built["user"], None)
-        return hint_text.strip() if hint_text else None
+        result = run_prompt(built["system"], built["user"], None)
+        
+        # Jeśli to dict z kluczem "hint"
+        if isinstance(result, dict) and "hint" in result:
+            return result["hint"].strip()
+        elif isinstance(result, str):
+            return result.strip()
+        else:
+            return str(result)
+            
     except Exception as e:
-        print(f"Błąd podczas generowania podpowiedzi: {e}")
+        print(f"Błąd generowania hintu ({hint_level}): {e}")
         return "Nie udało się wygenerować podpowiedzi w tej chwili."
-    
-if __name__ == "__main__":
-    quiz = generate_quiz(
-        topic="Postawy pythona",
-        difficulty="Średni",
-        num_questions=5
-    )

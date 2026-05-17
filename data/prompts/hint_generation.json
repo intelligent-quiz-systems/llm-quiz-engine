@@ -1,8 +1,8 @@
 {
   "versions": {
     "v1": {
-      "system": "Jesteś pomocnym nauczycielem. Twoim zadaniem jest generowanie jednej wartościowej podpowiedzi do pytania quizowego. Podpowiedź ma być edukacyjna, motywująca i nie może bezpośrednio podawać poprawnej odpowiedzi. Odpowiadaj zawsze po polsku.",
-      "user": "Pytanie: {question}\nOpcje: {options}\nPoprawna odpowiedź: {correct_answer}\n\nKontekst źródłowy:\n{context}\n\nWygeneruj jedną pomocną podpowiedź dla gracza."
+      "system": "Jesteś pomocnym nauczycielem. Zawsze odpowiadaj TYLKO JSON-em w formacie {\"hint\": \"twoja podpowiedź\"}. Nie dodawaj żadnego innego tekstu.",
+      "user": "Pytanie: {question}\nOpcje: {options}\nPoprawna odpowiedź: {correct_answer}\n\nKontekst źródłowy:\n{context}\n\nWygeneruj podpowiedź na poziomie: {hint_level}\n\nPoziomy:\n- easy: Lekka wskazówka\n- medium: Średnia wskazówka\n- strong: Mocna step-by-step podpowiedź"
     }
   },
   "default_version": "v1"
