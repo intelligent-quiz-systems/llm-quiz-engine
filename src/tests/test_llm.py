@@ -106,6 +106,7 @@ def load_llm_module(
     mod_provider  = ModuleType("llm.provider_errors")
     mod_guardrail = ModuleType("llm.guardrail")
     mod_shuffle   = ModuleType("llm.answer_shuffle")
+    mod_quality   = ModuleType("llm.question_quality")
     mod_pm_pkg    = ModuleType("prompt_manager")
     mod_pm        = ModuleType("prompt_manager.manager")
 
@@ -122,12 +123,15 @@ def load_llm_module(
     mod_config.MIN_BATCH_SIZE                = 1
     mod_config.MAX_ATTEMPTS_PER_BATCH_SIZE   = 2
     mod_config.GUARDRAIL_MAX_QUESTIONS       = 10
+    mod_config.SIMILAR_QUESTION_THRESHOLD    = 0.7
     mod_provider.classify_provider_error     = Mock(return_value={})
     mod_provider.format_error_log            = Mock(return_value="")
     mod_guardrail.build_guardrail_context    = Mock(return_value={"text": "", "question_count": 0, "chars": 0})
     mod_guardrail.extract_question_texts     = Mock(return_value=[])
     mod_guardrail.format_guardrail_log       = Mock(return_value="")
     mod_shuffle.shuffle_quiz_options         = Mock(side_effect=lambda q: q)
+    mod_quality.run_quality_checks           = Mock(return_value=[])
+    mod_quality.format_quality_log           = Mock(return_value="")
 
     # PromptManager used only by extract_topic_from_text
     fake_pm_instance = Mock()
@@ -144,6 +148,7 @@ def load_llm_module(
         ("llm.provider_errors", mod_provider),
         ("llm.guardrail", mod_guardrail),
         ("llm.answer_shuffle", mod_shuffle),
+        ("llm.question_quality", mod_quality),
         ("prompt_manager", mod_pm_pkg), ("prompt_manager.manager", mod_pm),
     ]:
         sys.modules[key] = mod
