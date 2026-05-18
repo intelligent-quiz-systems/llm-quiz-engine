@@ -15,7 +15,7 @@ OPTION_LABELS = ["A", "B", "C", "D", "E", "F"]
 DEFAULT_QUESTION_COUNT = 10
 DEFAULT_TIME_LIMIT_MINUTES = 20
 DEFAULT_TOPIC = "Podstawy Pythona"
-MAX_QUESTION_COUNT = 10
+MAX_QUESTION_COUNT = 100
 MAX_TIME_LIMIT_MINUTES = 60
 MAX_SOURCE_FILE_SIZE_BYTES = 10 * 1024 * 1024
 MIN_EXTRACTED_SOURCE_CHARS = 500
@@ -110,6 +110,9 @@ def init_state():
         "quiz_source_mode": "Temat quizu",
         "prev_quiz_source_mode": "Temat quizu",
         "source_uploader_version": 0,
+        "generation_worker": None,
+        "requested_question_count": 0,
+        "generation_final_status": None,
     }
 
     for key, value in defaults.items():
@@ -438,7 +441,9 @@ def reset_quiz_state():
     st.session_state.timeout_happened = False
     st.session_state.quiz_started_at = None
     st.session_state.history_saved = False
-
+    st.session_state.generation_worker = None
+    st.session_state.generation_final_status = None
+    st.session_state.requested_question_count = 0
 
     keys_to_remove = [k for k in st.session_state.keys() if k.startswith("widget_q_")]
     for key in keys_to_remove:
@@ -479,13 +484,40 @@ def render_sidebar_status(quiz, config):
         st.header(quiz.get("topic") or quiz.get("quiz_title", "Quiz"))
         st.progress(progress, text=f"Postęp: {answered}/{total_questions}")
         st.write(f"**Strona:** {st.session_state.current_page + 1}/{total_pages}")
+        if st.session_state.get("generation_worker") is not None:
+            requested = st.session_state.get("requested_question_count", total_questions)
+            st.caption(f"⚙️ Generowanie: {total_questions}/{requested} pytań")
         st.write(f"**Trudność:** {difficulty_label(config.get('difficulty'))}")
         st.write(f"**Limit czasu:** {config.get('time_limit', DEFAULT_TIME_LIMIT_MINUTES)} min")
         render_sidebar_timer()
 
 
+def render_generating_screen(snapshot, requested_count: int):
+    st_autorefresh(interval=1000, key="generation_poller")
+
+    partial = snapshot.partial_result
+    accepted = partial.get("accepted_count", 0) if partial else 0
+
+    st.title("Generowanie quizu")
+    progress = min(accepted / requested_count, 1.0) if requested_count > 0 else 0.0
+    st.progress(progress, text=f"Pytania: {accepted}/{requested_count}")
+
+    if accepted > 0:
+        st.info(
+            f"Pierwsze {accepted} pytania gotowe. "
+            f"Quiz uruchomi się automatycznie po załadowaniu pierwszej strony ({QUIZ_PAGE_SIZE} pytań)."
+        )
+    else:
+        st.info("Generowanie pytań w toku... Proszę czekać.")
+
+    if snapshot.error:
+        st.error(f"Błąd workera: {snapshot.error}")
+
+
 def render_quiz_screen(quiz, config):
     st_autorefresh(interval=1000, key="quiz_timer")
+    if st.session_state.get("generation_worker") is not None:
+        st_autorefresh(interval=1500, key="generation_poller")
 
     is_valid, error_message = validate_quiz(quiz)
     if not is_valid:
@@ -498,6 +530,18 @@ def render_quiz_screen(quiz, config):
     render_sidebar_status(quiz, config)
 
     st.title(quiz.get("quiz_title", quiz.get("topic", "Quiz")))
+
+    if st.session_state.get("generation_worker") is not None:
+        requested = st.session_state.get("requested_question_count", len(questions))
+        st.info(
+            f"⚙️ Generowanie w toku: {len(questions)}/{requested} pytań dostępnych. "
+            "Zakończenie quizu będzie możliwe po dograniu wszystkich pytań."
+        )
+    elif st.session_state.get("generation_final_status") == "halted":
+        requested = st.session_state.get("requested_question_count", len(questions))
+        st.warning(
+            f"Generowanie zostało przerwane. Quiz zawiera {len(questions)}/{requested} pytań."
+        )
 
     total_pages = math.ceil(len(questions) / QUIZ_PAGE_SIZE)
     page = st.session_state.current_page
@@ -540,9 +584,12 @@ def render_quiz_screen(quiz, config):
             st.rerun()
 
     with col3:
-        if st.button("Zakończ quiz", type="primary"):
-            st.session_state.app_step = "results"
-            st.rerun()
+        if st.session_state.get("generation_worker") is not None:
+            st.button("Zakończ quiz", type="primary", disabled=True)
+        else:
+            if st.button("Zakończ quiz", type="primary"):
+                st.session_state.app_step = "results"
+                st.rerun()
 
     inject_browser_scroll_on_nav()
 
