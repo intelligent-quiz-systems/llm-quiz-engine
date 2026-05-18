@@ -17,16 +17,16 @@ def load_prompts_from_directory(directory: Path) -> Dict[str, Dict[str, Any]]:
                 data = json.load(f)
 
             if not isinstance(data, dict):
-                print(f"✗ Błąd w pliku {file_path.name}: zawartość nie jest słownikiem")
+                print(f"[ERR] File {file_path.name}: content is not a dict")
                 continue
 
             name = file_path.stem
             prompts[name] = data
-            print(f"✓ Wczytano szablon: {name}")
+            print(f"[OK] Wczytano szablon: {name}")
 
         except json.JSONDecodeError as e:
-            print(f"✗ Błąd składni JSON w pliku {file_path.name}: {e}")
+            print(f"[ERR] JSON syntax error in {file_path.name}: {e}")
         except Exception as e:
-            print(f"✗ Nieznany błąd podczas wczytywania {file_path.name}: {e}")
+            print(f"[ERR] Unknown error loading {file_path.name}: {e}")
 
     return prompts
