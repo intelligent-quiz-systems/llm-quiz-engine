@@ -24,7 +24,10 @@ def _capture_stdout(log_path: Path):
 
     class _Tee:
         def write(self, data: str) -> None:
-            old.write(data)
+            try:
+                old.write(data)
+            except UnicodeEncodeError:
+                old.write(data.encode("ascii", errors="replace").decode("ascii"))
             buf.write(data)
 
         def flush(self) -> None:
@@ -49,10 +52,24 @@ def _load_mock_quiz(mock_path: Path) -> dict | None:
         return None
 
 
-def _build_summary(config: dict, quiz_data: dict | None, duration: float, error: str | None) -> dict:
+def _build_summary(
+    config: dict,
+    quiz_data: dict | None,
+    duration: float,
+    error: str | None,
+    diagnostics: dict | None = None,
+) -> dict:
     questions = quiz_data.get("questions", []) if quiz_data else []
     n = len(questions)
     ok = n > 0
+
+    batch_log    = (diagnostics or {}).get("batch_log", [])
+    total_tokens = sum(b.get("total_tokens") or 0 for b in batch_log) or None
+    n_batches    = (diagnostics or {}).get("total_batches")
+    n_rejected   = (diagnostics or {}).get("rejected_attempts")
+    min_batch    = (diagnostics or {}).get("final_locked_batch_size")
+    avg_tokens   = round(total_tokens / n, 3) if (total_tokens and n > 0) else None
+
     return {
         "topic": config["topic"],
         "difficulty": config["difficulty"],
@@ -62,11 +79,11 @@ def _build_summary(config: dict, quiz_data: dict | None, duration: float, error:
         "status": "completed" if ok else "failed",
         "duration_seconds": round(duration, 3),
         "avg_seconds_per_question": round(duration / n, 3) if n > 0 else None,
-        "n_batches": None,
-        "n_rejected_attempts": None,
-        "min_batch_size": None,
-        "total_tokens": None,
-        "avg_tokens_per_question": None,
+        "n_batches": n_batches,
+        "n_rejected_attempts": n_rejected,
+        "min_batch_size": min_batch,
+        "total_tokens": total_tokens,
+        "avg_tokens_per_question": avg_tokens,
         "model": None,
         "error": error,
     }
@@ -79,6 +96,68 @@ def _save_json(path: Path, data: dict) -> None:
 def _save_stub(test_dir: Path, filename: str, note: str, extra: dict | None = None) -> None:
     data = {"note": note, **(extra or {})}
     _save_json(test_dir / filename, data)
+
+
+def _save_diagnostics(test_dir: Path, diagnostics: dict) -> None:
+    """Write per-test diagnostic JSON files from the diagnostics_out dict."""
+    batch_log     = diagnostics.get("batch_log", [])
+    rejection_log = diagnostics.get("rejection_log", [])
+    gen_error     = diagnostics.get("generation_error")
+
+    # generation_state.json — full state snapshot
+    state_snapshot = {k: v for k, v in diagnostics.items() if k != "generation_error"}
+    _save_json(test_dir / "generation_state.json", state_snapshot)
+
+    # batch_summary.json — batch counts and per-batch log
+    _save_json(test_dir / "batch_summary.json", {
+        "total_batches":           diagnostics.get("total_batches", 0),
+        "rejected_attempts":       diagnostics.get("rejected_attempts", 0),
+        "initial_batch_size":      diagnostics.get("initial_batch_size"),
+        "final_locked_batch_size": diagnostics.get("final_locked_batch_size"),
+        "batches":                 batch_log,
+    })
+
+    # token_summary.json — aggregated totals + per-batch breakdown
+    total_input     = sum(b.get("input_tokens")     or 0 for b in batch_log) or None
+    total_output    = sum(b.get("output_tokens")    or 0 for b in batch_log) or None
+    total_reasoning = sum(b.get("reasoning_tokens") or 0 for b in batch_log) or None
+    total_all       = sum(b.get("total_tokens")     or 0 for b in batch_log) or None
+    _save_json(test_dir / "token_summary.json", {
+        "token_usage_known":      total_all is not None and total_all > 0,
+        "total_input_tokens":     total_input,
+        "total_output_tokens":    total_output,
+        "total_reasoning_tokens": total_reasoning,
+        "total_tokens":           total_all,
+        "per_batch": [
+            {
+                "batch_number":       b.get("batch_number"),
+                "accepted_questions": b.get("accepted_questions"),
+                "input_tokens":       b.get("input_tokens"),
+                "output_tokens":      b.get("output_tokens"),
+                "reasoning_tokens":   b.get("reasoning_tokens"),
+                "total_tokens":       b.get("total_tokens"),
+                "attempt_duration_s": b.get("attempt_duration_seconds"),
+                "system_prompt_chars": b.get("system_prompt_chars", 0),
+                "user_prompt_chars":  b.get("user_prompt_chars", 0),
+                "total_prompt_chars": b.get("total_prompt_chars", 0),
+            }
+            for b in batch_log
+        ],
+    })
+
+    # rejections_detail.json — only written when there were rejections
+    if rejection_log:
+        _save_json(test_dir / "rejections_detail.json", {"rejections": rejection_log})
+
+    # provider_error.json — only written when generation raised an exception
+    if gen_error:
+        data = gen_error if isinstance(gen_error, dict) else {"error": str(gen_error)}
+        _save_json(test_dir / "provider_error.json", data)
+
+    # quality_issues.json — only written when quality checks flagged issues
+    quality_issues = diagnostics.get("quality_issues", [])
+    if quality_issues:
+        _save_json(test_dir / "quality_issues.json", {"issues": quality_issues})
 
 
 def run_single_test(
@@ -107,6 +186,8 @@ def run_single_test(
         _save_stub(test_dir, "token_summary.json", "Token data not available.", {"total_tokens": None})
         return result
 
+    diagnostics: dict = {}
+
     with _capture_stdout(log_path):
         start = time.monotonic()
         quiz_data: dict | None = None
@@ -125,6 +206,7 @@ def run_single_test(
                     topic=config["topic"],
                     difficulty=config["difficulty"],
                     num_questions=config["count"],
+                    diagnostics_out=diagnostics,
                 )
                 if quiz_data is None:
                     error = "generate_quiz returned None"
@@ -134,7 +216,7 @@ def run_single_test(
 
         duration = time.monotonic() - start
 
-    result = _build_summary(config, quiz_data, duration, error)
+    result = _build_summary(config, quiz_data, duration, error, diagnostics=diagnostics or None)
 
     if quiz_data:
         _save_json(test_dir / "quiz.json", quiz_data)
@@ -142,8 +224,13 @@ def run_single_test(
         _save_json(test_dir / "error.json", {"error": error})
 
     _save_json(test_dir / "summary.json", result)
-    _save_stub(test_dir, "batch_summary.json", "Batch data not available in current generator version.", {"batches": []})
-    _save_stub(test_dir, "token_summary.json", "Token data not available in current generator version.", {"total_tokens": None, "per_call": []})
+
+    if diagnostics.get("batch_log") is not None:
+        _save_diagnostics(test_dir, diagnostics)
+    else:
+        # mock run or dry-run path — write minimal stubs
+        _save_stub(test_dir, "batch_summary.json", "No LLM call — mock or dry-run.", {"batches": []})
+        _save_stub(test_dir, "token_summary.json", "No LLM call — mock or dry-run.", {"total_tokens": None})
 
     label = "OK" if result["ok"] else "FAIL"
     print(f"  [{label}] {result['duration_seconds']:.1f}s | {result['count_generated']}/{result['count_requested']}q", flush=True)
