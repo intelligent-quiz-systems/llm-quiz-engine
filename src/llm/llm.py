@@ -13,6 +13,7 @@ from llm.provider_errors import classify_provider_error, format_error_log
 from llm.generation_config import TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS, SIMILAR_QUESTION_THRESHOLD, GUARDRAIL_MAX_QUESTIONS
 from llm.question_quality import run_quality_checks, format_quality_log
 from llm.guardrail import build_guardrail_context, extract_question_texts, format_guardrail_log
+from llm.answer_shuffle import shuffle_quiz_options
 
 # Import Prompt Managera
 from prompt_manager.manager import PromptManager
@@ -84,6 +85,7 @@ def generate_quiz(
         print(quiz_json)
 
         quiz = Quiz.model_validate(quiz_json)
+        quiz_json = shuffle_quiz_options(quiz_json)
 
         formatted_quiz_json = json.dumps(quiz_json, indent=2, ensure_ascii=False)
 
