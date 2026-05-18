@@ -20,6 +20,8 @@ class RejectionLogEntry(TypedDict):
     system_prompt_chars: int
     user_prompt_chars: int
     total_prompt_chars: int
+    guardrail_question_count: int
+    guardrail_chars: int
 
 
 class BatchLogEntry(TypedDict):
@@ -37,6 +39,8 @@ class BatchLogEntry(TypedDict):
     system_prompt_chars: int
     user_prompt_chars: int
     total_prompt_chars: int
+    guardrail_question_count: int
+    guardrail_chars: int
 
 
 class GenerationState(TypedDict):
@@ -92,6 +96,8 @@ def record_accepted_batch(
     system_prompt_chars: int = 0,
     user_prompt_chars: int = 0,
     total_prompt_chars: int = 0,
+    guardrail_question_count: int = 0,
+    guardrail_chars: int = 0,
 ) -> None:
     state["total_batches"] += 1
     state["accepted_questions"] += questions_accepted
@@ -110,6 +116,8 @@ def record_accepted_batch(
         system_prompt_chars=system_prompt_chars,
         user_prompt_chars=user_prompt_chars,
         total_prompt_chars=total_prompt_chars,
+        guardrail_question_count=guardrail_question_count,
+        guardrail_chars=guardrail_chars,
     ))
 
 
@@ -126,6 +134,8 @@ def record_rejection(
     system_prompt_chars: int = 0,
     user_prompt_chars: int = 0,
     total_prompt_chars: int = 0,
+    guardrail_question_count: int = 0,
+    guardrail_chars: int = 0,
 ) -> None:
     state["rejected_attempts"] += 1
     state["rejection_log"].append(RejectionLogEntry(
@@ -139,6 +149,8 @@ def record_rejection(
         system_prompt_chars=system_prompt_chars,
         user_prompt_chars=user_prompt_chars,
         total_prompt_chars=total_prompt_chars,
+        guardrail_question_count=guardrail_question_count,
+        guardrail_chars=guardrail_chars,
     ))
 
 

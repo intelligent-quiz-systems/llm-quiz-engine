@@ -77,6 +77,7 @@ def run_batched_generation(
     fallback_batch_size: int = FALLBACK_BATCH_SIZE,
     min_batch_size: int = MIN_BATCH_SIZE,
     max_attempts_per_size: int = MAX_ATTEMPTS_PER_BATCH_SIZE,
+    previous_questions: list[str] | None = None,
     state=None,           # optional GenerationState — populated when provided
     on_partial_ready=None,  # optional PartialReadyCallback — called after each accepted batch
 ) -> dict | None:
@@ -91,7 +92,8 @@ def run_batched_generation(
     from llm.llm_client import run_prompt
     from llm.quiz_model import Quiz
     from prompt_manager.manager import PromptManager
-    from llm.generation_config import QUIZ_SOURCE_CONTEXT_CHARS
+    from llm.generation_config import QUIZ_SOURCE_CONTEXT_CHARS, GUARDRAIL_MAX_QUESTIONS
+    from llm.guardrail import build_guardrail_context
 
     if state is not None:
         from llm.generation_state import record_accepted_batch, record_rejection
@@ -117,11 +119,25 @@ def run_batched_generation(
         # Per-attempt diagnostic accumulators (reset each iteration)
         _s_chars = 0
         _u_chars = 0
+        _g_q_count = 0
+        _g_chars = 0
         _attempt_start = time.monotonic()
 
         try:
+            accumulated_texts = [q.get("question", "") for q in accumulated if q.get("question")]
+            all_prior = list(previous_questions or []) + accumulated_texts
+            use_guardrail = bool(all_prior)
+            if use_guardrail:
+                guardrail_ctx = build_guardrail_context(all_prior, max_questions=GUARDRAIL_MAX_QUESTIONS)
+                guardrail_text = guardrail_ctx["text"]
+                _g_q_count = guardrail_ctx.get("question_count", 0)
+                _g_chars = guardrail_ctx.get("chars", 0)
+            else:
+                guardrail_text = ""
+
             built = manager.build_from_template(
                 prompt_name="quiz_generation",
+                version="v2" if use_guardrail else None,
                 topic=topic,
                 difficulty=difficulty,
                 num_questions=batch_size,
@@ -130,6 +146,7 @@ def run_batched_generation(
                     if source_text
                     else "No source text provided."
                 ),
+                guardrail=guardrail_text,
             )
             if not built:
                 print("[batch] prompt build failed - halting")
@@ -160,6 +177,8 @@ def run_batched_generation(
                         system_prompt_chars=_s_chars,
                         user_prompt_chars=_u_chars,
                         total_prompt_chars=_s_chars + _u_chars,
+                        guardrail_question_count=_g_q_count,
+                        guardrail_chars=_g_chars,
                     )
                 accumulated.extend(questions)
                 current_batch += 1
@@ -183,6 +202,8 @@ def run_batched_generation(
                     system_prompt_chars=_s_chars,
                     user_prompt_chars=_u_chars,
                     total_prompt_chars=_s_chars + _u_chars,
+                    guardrail_question_count=_g_q_count,
+                    guardrail_chars=_g_chars,
                 )
 
         # Handle non-accept outcomes

@@ -69,6 +69,7 @@ def generate_quiz(
     difficulty: str,
     num_questions: int,
     source_text: str | None = None,
+    previous_questions: list[str] | None = None,
     diagnostics_out: dict | None = None,
 ) -> dict | None:
     """
@@ -87,6 +88,7 @@ def generate_quiz(
             fallback_batch_size=FALLBACK_BATCH_SIZE,
             min_batch_size=MIN_BATCH_SIZE,
             max_attempts_per_size=MAX_ATTEMPTS_PER_BATCH_SIZE,
+            previous_questions=previous_questions,
             state=state,
         )
     except Exception as e:
