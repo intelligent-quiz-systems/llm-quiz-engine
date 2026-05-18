@@ -69,10 +69,14 @@ def generate_quiz(
     difficulty: str,
     num_questions: int,
     source_text: str | None = None,
+    diagnostics_out: dict | None = None,
 ) -> dict | None:
     """
     Orchestrate synchronous quiz generation.
     For background generation use BackgroundGenerationWorker from background_worker.
+
+    diagnostics_out: optional dict populated with GenerationState fields after
+    the run. Callers that pass None get identical behaviour.
     """
     state = create_state(topic, difficulty, num_questions, INITIAL_BATCH_SIZE)
 
@@ -87,9 +91,15 @@ def generate_quiz(
         )
     except Exception as e:
         print("Generation error:", e)
+        if diagnostics_out is not None:
+            diagnostics_out.update(dict(state))
+            diagnostics_out["generation_error"] = str(e)
         return None
 
     print(format_state_summary(state))
+
+    if diagnostics_out is not None:
+        diagnostics_out.update(dict(state))
 
     if quiz_json is None:
         return None
