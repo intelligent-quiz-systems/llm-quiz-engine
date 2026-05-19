@@ -15,6 +15,7 @@ from screens.screens import (
 from rag.load_files import get_uploaded_file_id, read_uploaded_source_file
 
 from llm.llm import extract_topic_from_text
+from llm.partial_loading import GenerationStatus
 
 st.set_page_config(page_title="Quiz Generator", page_icon="🧠", layout="centered")
 
@@ -130,7 +131,7 @@ elif st.session_state.app_step == "generating":
         st.session_state.history_saved = False
         st.session_state.app_step = "quiz"
         if snapshot.is_done:
-            final_s = partial.get("status", "completed") if partial else "failed"
+            final_s = partial.get("status", GenerationStatus.COMPLETED) if partial else GenerationStatus.FAILED
             st.session_state.generation_final_status = final_s
             st.session_state.generation_worker = None
         st.rerun()
@@ -157,7 +158,7 @@ elif st.session_state.app_step == "quiz":
             if partial.get("quiz_title"):
                 st.session_state.quiz_data["quiz_title"] = partial["quiz_title"]
         if snapshot.is_done:
-            final_s = partial.get("status", "completed") if partial else "failed"
+            final_s = partial.get("status", GenerationStatus.COMPLETED) if partial else GenerationStatus.FAILED
             st.session_state.generation_final_status = final_s
             st.session_state.generation_worker = None
     render_quiz_screen(st.session_state.quiz_data, st.session_state.config)

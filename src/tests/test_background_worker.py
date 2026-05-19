@@ -13,16 +13,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src" / "llm"))
 from background_worker import (
     BackgroundGenerationWorker,
     WorkerSnapshot,
-    WORKER_IDLE,
-    WORKER_RUNNING,
-    WORKER_DONE,
+    WorkerStatus,
 )
 from generation_state import create_state, record_accepted_batch
 from partial_loading import (
     build_partial_result,
     build_final_result,
-    STATUS_PARTIAL,
-    STATUS_COMPLETED,
+    GenerationStatus,
 )
 
 
@@ -49,7 +46,7 @@ def _make_final(accepted: int = 10, requested: int = 10) -> dict:
 
 def test_initial_worker_status_is_idle():
     w = BackgroundGenerationWorker("Python", "easy", 10)
-    assert w.get_snapshot().worker_status == WORKER_IDLE
+    assert w.get_snapshot().worker_status == WorkerStatus.IDLE
 
 
 def test_initial_is_done_false():
@@ -84,7 +81,7 @@ def test_start_changes_status_to_running_or_done():
     w.start()
     snap = w.get_snapshot()
     # Status should be RUNNING (thread blocked in fast_run) or DONE (race)
-    assert snap.worker_status in (WORKER_RUNNING, WORKER_DONE)
+    assert snap.worker_status in (WorkerStatus.RUNNING, WorkerStatus.DONE)
     done.set()  # release the thread
 
 
@@ -118,14 +115,14 @@ def test_worker_calls_on_partial_ready_and_completes():
     w = BackgroundGenerationWorker("Python", "easy", 10, _run_function=run)
     w.start()
     done.wait(timeout=2.0)
-    # Give the finally block time to set WORKER_DONE
+    # Give the finally block time to set WorkerStatus.DONE
     time.sleep(0.05)
 
     assert w.is_done() is True
     snap = w.get_snapshot()
     assert snap.partial_result is not None
     assert snap.error is None
-    assert snap.worker_status == WORKER_DONE
+    assert snap.worker_status == WorkerStatus.DONE
 
 
 def test_worker_final_partial_result_accessible():
@@ -142,7 +139,7 @@ def test_worker_final_partial_result_accessible():
     time.sleep(0.05)
 
     snap = w.get_snapshot()
-    assert snap.partial_result["status"] == STATUS_COMPLETED
+    assert snap.partial_result["status"] == GenerationStatus.COMPLETED
 
 
 def test_worker_multiple_partials_last_wins():
@@ -203,7 +200,7 @@ def test_worker_done_even_after_exception():
 def test_snapshot_is_done_matches_worker_status():
     w = BackgroundGenerationWorker("Python", "easy", 5)
     snap = w.get_snapshot()
-    assert snap.is_done == (snap.worker_status == WORKER_DONE)
+    assert snap.is_done == (snap.worker_status == WorkerStatus.DONE)
 
 
 # ── Standalone runner ─────────────────────────────────────────────────────────

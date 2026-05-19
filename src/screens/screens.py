@@ -7,8 +7,9 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 from validations.validate_quiz import validate_quiz
 from datetime import datetime, timezone
-from uuid import uuid4 
+from uuid import uuid4
 from history.history import append_attempt, load_history
+from llm.partial_loading import GenerationStatus
 
 QUIZ_PAGE_SIZE = 3
 OPTION_LABELS = ["A", "B", "C", "D", "E", "F"]
@@ -546,7 +547,7 @@ def render_quiz_screen(quiz, config):
             f"⚙️ Generowanie w toku: {len(questions)}/{requested} pytań dostępnych. "
             "Zakończenie quizu będzie możliwe po dograniu wszystkich pytań."
         )
-    elif st.session_state.get("generation_final_status") == "halted":
+    elif st.session_state.get("generation_final_status") == GenerationStatus.HALTED:
         requested = st.session_state.get("requested_question_count", len(questions))
         st.warning(
             f"Generowanie zostało przerwane. Quiz zawiera {len(questions)}/{requested} pytań."

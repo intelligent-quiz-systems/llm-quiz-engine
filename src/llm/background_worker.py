@@ -19,21 +19,26 @@ Usage:
 from __future__ import annotations
 import threading
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from llm.partial_loading import PartialResult
 
-# Worker lifecycle — separate from generation status values in partial_loading
-WORKER_IDLE    = "idle"
-WORKER_RUNNING = "running"
-WORKER_DONE    = "done"
+
+# ── Worker lifecycle status ───────────────────────────────────────────────────
+
+class WorkerStatus(str, Enum):
+    """Worker thread lifecycle status. Separate from GenerationStatus in partial_loading."""
+    IDLE    = "idle"
+    RUNNING = "running"
+    DONE    = "done"
 
 
 @dataclass
 class WorkerSnapshot:
     """Immutable, thread-safe snapshot of worker state at a point in time."""
-    worker_status: str               # WORKER_IDLE / WORKER_RUNNING / WORKER_DONE
+    worker_status: WorkerStatus
     partial_result: PartialResult | None  # latest result, or None if none yet
     is_done: bool                    # True when thread has exited
     error: str | None                # set if the worker thread raised an exception
@@ -68,7 +73,7 @@ class BackgroundGenerationWorker:
 
         self._lock           = threading.Lock()
         self._thread: threading.Thread | None = None
-        self._worker_status  = WORKER_IDLE
+        self._worker_status  = WorkerStatus.IDLE
         self._latest_partial = None
         self._error: str | None = None
 
@@ -77,9 +82,9 @@ class BackgroundGenerationWorker:
     def start(self) -> None:
         """Launch background generation. Non-blocking — returns immediately."""
         with self._lock:
-            if self._worker_status != WORKER_IDLE:
+            if self._worker_status != WorkerStatus.IDLE:
                 return
-            self._worker_status = WORKER_RUNNING
+            self._worker_status = WorkerStatus.RUNNING
 
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -90,14 +95,14 @@ class BackgroundGenerationWorker:
             return WorkerSnapshot(
                 worker_status=self._worker_status,
                 partial_result=self._latest_partial,
-                is_done=(self._worker_status == WORKER_DONE),
+                is_done=(self._worker_status == WorkerStatus.DONE),
                 error=self._error,
             )
 
     def is_done(self) -> bool:
         """Return True when the background thread has exited."""
         with self._lock:
-            return self._worker_status == WORKER_DONE
+            return self._worker_status == WorkerStatus.DONE
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -118,7 +123,7 @@ class BackgroundGenerationWorker:
                 self._error = str(exc)
         finally:
             with self._lock:
-                self._worker_status = WORKER_DONE
+                self._worker_status = WorkerStatus.DONE
 
     def _real_run(self) -> None:
         """Actual generation path. All imports deferred to avoid env-var errors at load time."""
