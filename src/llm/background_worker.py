@@ -129,6 +129,7 @@ class BackgroundGenerationWorker:
             MIN_BATCH_SIZE, MAX_ATTEMPTS_PER_BATCH_SIZE,
         )
         from llm.partial_loading import build_final_result
+        from llm.answer_shuffle import shuffle_quiz_options_balanced
 
         state = create_state(
             self._topic, self._difficulty, self._num_questions, INITIAL_BATCH_SIZE
@@ -143,6 +144,23 @@ class BackgroundGenerationWorker:
             state=state,
             on_partial_ready=self._on_partial_ready,
         )
+
+        # Final structural validation — same safety net as _post_process_quiz() in generate_quiz().
+        # Batches are already Pydantic-validated at parse time, so failure here is extremely
+        # unlikely but would indicate corruption introduced after batch assembly.
+        if quiz_json:
+            from pydantic import ValidationError
+            from llm.quiz_model import Quiz
+            try:
+                Quiz.model_validate(quiz_json)
+            except ValidationError as exc:
+                print(f"[validation] final quiz failed model_validate: {exc}")
+
+        # Apply balanced shuffle to the final quiz before surfacing it to the UI.
+        # Intermediate partial results (per-batch callbacks) are left unshuffled
+        # to avoid visible question reordering during streaming.
+        if quiz_json:
+            quiz_json = shuffle_quiz_options_balanced(quiz_json)
 
         questions  = quiz_json.get("questions", []) if quiz_json else []
         quiz_title = quiz_json.get("quiz_title")    if quiz_json else None

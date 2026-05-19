@@ -15,7 +15,14 @@ OPTION_LABELS = ["A", "B", "C", "D", "E", "F"]
 DEFAULT_QUESTION_COUNT = 10
 DEFAULT_TIME_LIMIT_MINUTES = 20
 DEFAULT_TOPIC = "Podstawy Pythona"
-MAX_QUESTION_COUNT = 100
+MAX_QUESTION_COUNT = 100  # runner CLI and JSON import — no UI limit applied here
+
+# UI question limits per difficulty (Streamlit only)
+_QUESTION_LIMITS_BY_DIFFICULTY = {
+    "Łatwy":  50,
+    "Średni": 50,
+    "Trudny": 20,
+}
 MAX_TIME_LIMIT_MINUTES = 60
 MAX_SOURCE_FILE_SIZE_BYTES = 10 * 1024 * 1024
 MIN_EXTRACTED_SOURCE_CHARS = 500
@@ -360,18 +367,20 @@ def render_config_screen():
             )
 
     topic = st.text_input("Temat quizu", key="topic_input")
-    question_count = st.number_input(
-        "Liczba pytań",
-        min_value=1,
-        max_value=MAX_QUESTION_COUNT,
-        value=DEFAULT_QUESTION_COUNT,
-        step=1,
-    )
     difficulty = st.selectbox(
         "Poziom trudności",
         options=list(QuizDifficulty),
         format_func=lambda x: x.value,
         index=1,
+    )
+    max_q = _QUESTION_LIMITS_BY_DIFFICULTY.get(str(difficulty), 50)
+    question_count = st.number_input(
+        "Liczba pytań",
+        min_value=1,
+        max_value=max_q,
+        value=min(DEFAULT_QUESTION_COUNT, max_q),
+        step=1,
+        help=f"Maksymalnie {max_q} pytań dla tego poziomu trudności",
     )
     time_limit = st.number_input(
         "Limit czasu (minuty)",

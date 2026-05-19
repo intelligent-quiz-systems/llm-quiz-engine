@@ -130,6 +130,7 @@ def load_llm_module(
     mod_guardrail.extract_question_texts     = Mock(return_value=[])
     mod_guardrail.format_guardrail_log       = Mock(return_value="")
     mod_shuffle.shuffle_quiz_options         = Mock(side_effect=lambda q: q)
+    mod_shuffle.shuffle_quiz_options_balanced = Mock(side_effect=lambda q: q)
     mod_quality.run_quality_checks           = Mock(return_value=[])
     mod_quality.format_quality_log           = Mock(return_value="")
 
@@ -234,6 +235,14 @@ def test_generate_quiz_passes_state_to_run_batched():
     _, kwargs = mock_batch.call_args
     assert "state" in kwargs
     assert kwargs["state"] is not None
+
+
+def test_generate_quiz_calls_balanced_shuffle():
+    quiz = make_valid_quiz_response("Python")
+    mock_batch = Mock(return_value=quiz)
+    llm = load_llm_module(mock_batch, module_name="t_shuffle_called")
+    llm.generate_quiz("Python", "easy", 1)
+    assert sys.modules["llm.answer_shuffle"].shuffle_quiz_options_balanced.called
 
 
 def test_generate_quiz_validates_result_with_quiz_model():

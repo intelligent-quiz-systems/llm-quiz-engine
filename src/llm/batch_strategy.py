@@ -4,6 +4,12 @@ Batch retry/fallback strategy for quiz generation.
 Generates quiz questions in multiple API calls, reducing batch size
 on failures and retrying according to the configured limits.
 
+Reduction sequence: 10 → 5 → 3 → 2 → 1 → 1 → 1 → halt
+  - Quality errors and output errors cause immediate reduction (no retry).
+  - Transient API errors ("retry") allow up to MAX_ATTEMPTS_PER_BATCH_SIZE
+    retries before reducing.
+  - batch_size=1 allows MAX_SINGLE_ATTEMPTS consecutive fails before halt.
+
 Error classification here is intentionally lightweight — it maps exceptions
 to control-flow decisions (reduce/retry/halt) only. For full diagnostic
 logging of error details, see the diagnostics/provider-error-details branch.
@@ -19,10 +25,12 @@ Decision = Literal["accept", "retry", "reduce", "halt"]
 
 # Module-level defaults — match generation_config.py values.
 # Defined here so this module can be imported without triggering llm/__init__.py.
-INITIAL_BATCH_SIZE          : int = 10
-FALLBACK_BATCH_SIZE         : int = 5
-MIN_BATCH_SIZE              : int = 1
-MAX_ATTEMPTS_PER_BATCH_SIZE : int = 2
+INITIAL_BATCH_SIZE          : int   = 10
+FALLBACK_BATCH_SIZE         : int   = 5
+MIN_BATCH_SIZE              : int   = 1
+MAX_ATTEMPTS_PER_BATCH_SIZE : int   = 2
+BATCH_SIZE_STEPS            : tuple = (10, 5, 3, 2, 1)
+MAX_SINGLE_ATTEMPTS         : int   = 3
 
 
 # ── Decision helpers (pure, testable without API) ─────────────────────────────
@@ -45,15 +53,18 @@ def classify_exception(exc: Exception) -> Decision:
 
 def reduce_batch_size(
     current: int,
-    fallback: int = FALLBACK_BATCH_SIZE,
-    minimum: int = MIN_BATCH_SIZE,
+    steps: tuple = BATCH_SIZE_STEPS,
 ) -> int:
-    """Return the next smaller batch size. Cannot go below minimum."""
-    if current > fallback:
-        return fallback
-    if current > minimum:
-        return minimum
-    return minimum
+    """
+    Return the next smaller batch size from the reduction sequence.
+
+    Scans BATCH_SIZE_STEPS for the first value smaller than current.
+    Returns the minimum step if current is already at or below it.
+    """
+    for step in steps:
+        if step < current:
+            return step
+    return steps[-1]
 
 
 def should_reduce(decision: Decision, attempts_at_size: int, max_attempts: int) -> bool:
@@ -77,12 +88,19 @@ def run_batched_generation(
     fallback_batch_size: int = FALLBACK_BATCH_SIZE,
     min_batch_size: int = MIN_BATCH_SIZE,
     max_attempts_per_size: int = MAX_ATTEMPTS_PER_BATCH_SIZE,
+    batch_size_steps: tuple = BATCH_SIZE_STEPS,
+    max_single_attempts: int = MAX_SINGLE_ATTEMPTS,
     previous_questions: list[str] | None = None,
     state=None,           # optional GenerationState — populated when provided
     on_partial_ready=None,  # optional PartialReadyCallback — called after each accepted batch
 ) -> dict | None:
     """
     Generate quiz questions in batches with retry/fallback.
+
+    Reduction sequence: initial → ... → 1 → 1 → 1 → halt
+    Each quality error or output error causes immediate batch size reduction.
+    Transient errors allow up to max_attempts_per_size retries before reducing.
+    At batch_size=1, max_single_attempts consecutive fails trigger a halt.
 
     Returns a quiz dict {'quiz_title': ..., 'questions': [...]} or None if
     generation failed completely. The returned questions list may be shorter
@@ -94,6 +112,7 @@ def run_batched_generation(
     from prompt_manager.manager import PromptManager
     from llm.generation_config import QUIZ_SOURCE_CONTEXT_CHARS, GUARDRAIL_MAX_QUESTIONS
     from llm.guardrail import build_guardrail_context
+    from llm.question_quality import run_per_batch_gate, format_quality_log
 
     if state is not None:
         from llm.generation_state import record_accepted_batch, record_rejection
@@ -103,10 +122,13 @@ def run_batched_generation(
     quiz_title: str | None = None
     locked_size = initial_batch_size
     attempts_at_size = 0
-    current_batch = 1          # batch number for state tracking (1-based)
-    batch_attempt_count = 0    # attempts on the current (in-progress) batch
-    # Safety cap: avoids infinite loops in degenerate configs
-    total_cap = (num_questions // max(min_batch_size, 1) + 2) * max_attempts_per_size * 3
+    single_question_attempts = 0   # consecutive fails at batch_size=1
+    current_batch = 1              # batch number for state tracking (1-based)
+    batch_attempt_count = 0        # attempts on the current (in-progress) batch
+
+    # Dead-loop safety guard only — not a primary control mechanism.
+    # Normal flow halts via single_question_attempts long before this cap.
+    total_cap = num_questions * 4 + 30
     total_attempts = 0
 
     while len(accumulated) < num_questions and total_attempts < total_cap:
@@ -163,33 +185,59 @@ def run_batched_generation(
             if not questions:
                 decision = "reduce"
             else:
-                if quiz_title is None:
-                    quiz_title = raw["quiz"].get("quiz_title", f"Quiz: {topic}")
-                if state is not None:
-                    record_accepted_batch(
-                        state, current_batch, batch_size, len(questions), batch_attempt_count,
-                        attempt_duration_seconds=_attempt_dur,
-                        batch_duration_seconds=_attempt_dur,
-                        input_tokens=raw.get("input_tokens"),
-                        output_tokens=raw.get("output_tokens"),
-                        reasoning_tokens=raw.get("reasoning_tokens"),
-                        total_tokens=raw.get("total_tokens"),
-                        system_prompt_chars=_s_chars,
-                        user_prompt_chars=_u_chars,
-                        total_prompt_chars=_s_chars + _u_chars,
-                        guardrail_question_count=_g_q_count,
-                        guardrail_chars=_g_chars,
+                # ── Hard quality gate ────────────────────────────────────────
+                gate_issues = run_per_batch_gate(questions, accumulated)
+                hard_issues = [iss for iss in gate_issues if iss["severity"] == "error"]
+                if gate_issues:
+                    print(format_quality_log(gate_issues))
+                if hard_issues:
+                    print(
+                        f"[batch] quality gate rejected {len(hard_issues)} error(s) "
+                        f"— reducing batch size"
                     )
-                accumulated.extend(questions)
-                current_batch += 1
-                batch_attempt_count = 0
-                attempts_at_size = 0
-                print(f"[batch] accepted {len(questions)}q - total {len(accumulated)}/{num_questions}")
-                if on_partial_ready is not None and state is not None:
-                    from llm.partial_loading import build_partial_result, should_return_partial
-                    if should_return_partial(state):
-                        on_partial_ready(build_partial_result(accumulated, quiz_title, state))
-                continue
+                    decision = "reduce"
+                    if state is not None:
+                        record_rejection(
+                            state, current_batch, batch_attempt_count, batch_size, "reduce",
+                            "QualityGateReject",
+                            attempt_duration_seconds=_attempt_dur,
+                            system_prompt_chars=_s_chars,
+                            user_prompt_chars=_u_chars,
+                            total_prompt_chars=_s_chars + _u_chars,
+                            guardrail_question_count=_g_q_count,
+                            guardrail_chars=_g_chars,
+                        )
+                    # Fall through to the reduce logic below
+                else:
+                    # ── Accept batch ─────────────────────────────────────────
+                    if quiz_title is None:
+                        quiz_title = raw["quiz"].get("quiz_title", f"Quiz: {topic}")
+                    if state is not None:
+                        record_accepted_batch(
+                            state, current_batch, batch_size, len(questions), batch_attempt_count,
+                            attempt_duration_seconds=_attempt_dur,
+                            batch_duration_seconds=_attempt_dur,
+                            input_tokens=raw.get("input_tokens"),
+                            output_tokens=raw.get("output_tokens"),
+                            reasoning_tokens=raw.get("reasoning_tokens"),
+                            total_tokens=raw.get("total_tokens"),
+                            system_prompt_chars=_s_chars,
+                            user_prompt_chars=_u_chars,
+                            total_prompt_chars=_s_chars + _u_chars,
+                            guardrail_question_count=_g_q_count,
+                            guardrail_chars=_g_chars,
+                        )
+                    accumulated.extend(questions)
+                    current_batch += 1
+                    batch_attempt_count = 0
+                    attempts_at_size = 0
+                    single_question_attempts = 0
+                    print(f"[batch] accepted {len(questions)}q - total {len(accumulated)}/{num_questions}")
+                    if on_partial_ready is not None and state is not None:
+                        from llm.partial_loading import build_partial_result, should_return_partial
+                        if should_return_partial(state):
+                            on_partial_ready(build_partial_result(accumulated, quiz_title, state))
+                    continue
 
         except Exception as exc:
             _attempt_dur = round(time.monotonic() - _attempt_start, 3)
@@ -206,20 +254,33 @@ def run_batched_generation(
                     guardrail_chars=_g_chars,
                 )
 
-        # Handle non-accept outcomes
+        # ── Handle non-accept outcomes ────────────────────────────────────────
         attempts_at_size += 1
+
         if decision == "halt":
             break
+
+        # Track consecutive fails at batch_size=1
+        if locked_size == 1:
+            single_question_attempts += 1
+            if single_question_attempts >= max_single_attempts:
+                print(
+                    f"[batch] {max_single_attempts} consecutive fails at batch_size=1 - halting"
+                )
+                break
+
         if should_reduce(decision, attempts_at_size, max_attempts_per_size):
-            new_size = reduce_batch_size(locked_size, fallback_batch_size, min_batch_size)
+            new_size = reduce_batch_size(locked_size, batch_size_steps)
             if new_size < locked_size:
                 print(f"[batch] reducing {locked_size} -> {new_size}")
                 locked_size = new_size
                 attempts_at_size = 0
+                if locked_size > 1:
+                    single_question_attempts = 0
             else:
                 print("[batch] already at minimum batch size - halting")
                 break
-        # else: "retry" → loop continues with same locked_size
+        # else: "retry" within budget → loop continues with same locked_size
 
     if state is not None:
         state["final_locked_batch_size"] = locked_size
