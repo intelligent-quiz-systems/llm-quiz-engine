@@ -9,6 +9,7 @@ where retry/reduce operates independently per slice, not across the whole docume
 """
 from __future__ import annotations
 
+from llm.generation_config import MAX_EXTRACTED_SOURCE_CHARS
 from rag.rag import (
     RAGBatch,
     build_rag_pipeline,
@@ -35,6 +36,15 @@ def build_source_slices_from_file(
     rag_split_summary contains human-readable metadata about how the document
     was divided: section/chunk/batch counts, per-slice token and question info.
     """
+    if len(source_text) > MAX_EXTRACTED_SOURCE_CHARS:
+        return (
+            None,
+            f"Plik zawiera zbyt dużo tekstu po ekstrakcji "
+            f"({len(source_text):,} znaków). "
+            f"Maksimum to {MAX_EXTRACTED_SOURCE_CHARS:,} znaków.",
+            None,
+        )
+
     rag_source = make_file_source("src_1", file_name, source_text)
     try:
         chunks, rag_batches, logs = build_rag_pipeline([rag_source])

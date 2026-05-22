@@ -14,6 +14,12 @@ LLM_TEMPERATURE = 0.7
 TOPIC_EXTRACTION_CHARS    = 2000
 QUIZ_SOURCE_CONTEXT_CHARS = 10000
 
+# Maximum extracted text size for RAG mode (chars after file extraction).
+# Checked in source_slices.py before the RAG pipeline runs.
+# Corresponds to ~25 000 tokens (chars / 4), which allows documents up to
+# ~100 000 characters — enough for most textbooks, articles, and manuals.
+MAX_EXTRACTED_SOURCE_CHARS = 100_000
+
 # Guardrail context - maximum number of prior questions forwarded to the model.
 # Set high so the LLM sees full quiz context even for large quizzes and CLI runs
 # that may exceed the UI limits.
