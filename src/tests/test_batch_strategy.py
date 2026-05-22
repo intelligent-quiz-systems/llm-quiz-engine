@@ -175,6 +175,25 @@ def test_max_attempts_positive():
     assert MAX_ATTEMPTS_PER_BATCH_SIZE >= 1
 
 
+# ── cross_slice_accumulated parameter ────────────────────────────────────────
+
+def test_cross_slice_accumulated_param_has_none_default():
+    import inspect
+    from batch_strategy import run_batched_generation
+    sig = inspect.signature(run_batched_generation)
+    param = sig.parameters.get("cross_slice_accumulated")
+    assert param is not None, "cross_slice_accumulated param missing from run_batched_generation"
+    assert param.default is None
+
+
+def test_cross_slice_accumulated_is_keyword_only():
+    import inspect
+    from batch_strategy import run_batched_generation
+    sig = inspect.signature(run_batched_generation)
+    param = sig.parameters["cross_slice_accumulated"]
+    assert param.kind == inspect.Parameter.KEYWORD_ONLY
+
+
 # ── Standalone runner ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

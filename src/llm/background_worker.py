@@ -189,6 +189,10 @@ class BackgroundGenerationWorker:
         that partial results show the growing total. After each completed slice the
         latest partial is published for live UI updates between slices.
         Retry/reduce operates independently per slice.
+
+        Cross-slice quality: before each slice, all questions accepted by previous
+        slices are passed as previous_questions (guardrail) and cross_slice_accumulated
+        (quality gate), so duplicate and similarity detection covers the whole quiz.
         """
         from llm.batch_strategy import run_batched_generation
         from llm.generation_state import create_state
@@ -210,12 +214,18 @@ class BackgroundGenerationWorker:
             if n_questions <= 0:
                 continue
 
+            prev_question_texts = [
+                q.get("question", "") for q in all_questions if q.get("question")
+            ]
+
             slice_quiz = run_batched_generation(
                 self._topic, self._difficulty, n_questions, source_text,
                 initial_batch_size=INITIAL_BATCH_SIZE,
                 fallback_batch_size=FALLBACK_BATCH_SIZE,
                 min_batch_size=MIN_BATCH_SIZE,
                 max_attempts_per_size=MAX_ATTEMPTS_PER_BATCH_SIZE,
+                previous_questions=prev_question_texts,
+                cross_slice_accumulated=list(all_questions),
                 state=state,
                 on_partial_ready=None,
             )

@@ -203,6 +203,137 @@ def test_snapshot_is_done_matches_worker_status():
     assert snap.is_done == (snap.worker_status == WorkerStatus.DONE)
 
 
+# ── source_slices parameter ───────────────────────────────────────────────────
+
+def test_source_slices_stored_on_init():
+    slices = [("ctx1", 3), ("ctx2", 3)]
+    w = BackgroundGenerationWorker("Python", "easy", 6, source_slices=slices)
+    assert w._source_slices == slices
+    assert w._source_text is None
+
+
+def test_source_slices_alongside_source_text():
+    slices = [("ctx1", 5)]
+    w = BackgroundGenerationWorker("Python", "easy", 5,
+                                   source_text="ignored_when_slices_set",
+                                   source_slices=slices)
+    assert w._source_slices == slices
+    assert w._source_text == "ignored_when_slices_set"
+
+
+# ── cross-slice quality gate ──────────────────────────────────────────────────
+
+def _ensure_llm_package_importable():
+    """Insert src/ before src/llm/ in sys.path so 'llm' resolves as a package.
+
+    test_background_worker.py inserts src/llm/ at position 0, which makes
+    'import llm' find llm.py (a file) instead of the llm/ package. Inserting
+    src/ first fixes this for tests that need to patch llm.batch_strategy.
+    """
+    _src = str(Path(__file__).resolve().parents[2] / "src")
+    if not sys.path or sys.path[0] != _src:
+        sys.path.insert(0, _src)
+
+
+def test_real_run_slices_passes_growing_cross_slice_context():
+    """
+    _real_run_slices must pass all previously accepted questions to each
+    subsequent slice as both previous_questions (guardrail) and
+    cross_slice_accumulated (quality gate), so duplicate/similarity detection
+    covers the whole quiz, not just a single slice.
+    """
+    _ensure_llm_package_importable()
+    from unittest.mock import patch as mock_patch
+
+    recorded = []
+
+    def fake_run_batched(topic, difficulty, n_q, source_text, *,
+                         previous_questions=None,
+                         cross_slice_accumulated=None, **kw):
+        recorded.append({
+            "n_prev":  len(previous_questions or []),
+            "n_cross": len(cross_slice_accumulated or []),
+        })
+        return {
+            "quiz_title": "T",
+            "questions": [
+                {"question": f"Q{len(recorded)}_{i}?",
+                 "options": ["A", "B", "C", "D"], "correct_index": 0}
+                for i in range(n_q)
+            ],
+        }
+
+    slices = [("ctx1", 2), ("ctx2", 2), ("ctx3", 2)]
+    with mock_patch("llm.batch_strategy.run_batched_generation",
+                    side_effect=fake_run_batched):
+        w = BackgroundGenerationWorker("Python", "easy", 6, source_slices=slices)
+        w.start()
+        time.sleep(0.5)
+
+    assert w.is_done()
+    assert len(recorded) == 3, "expected one run_batched_generation call per slice"
+
+    # Slice 1: no context from previous slices
+    assert recorded[0]["n_prev"] == 0
+    assert recorded[0]["n_cross"] == 0
+
+    # Slice 2: 2 questions from slice 1
+    assert recorded[1]["n_prev"] == 2, (
+        "guardrail should contain questions from slice 1"
+    )
+    assert recorded[1]["n_cross"] == 2, (
+        "quality gate should check against slice 1 questions"
+    )
+
+    # Slice 3: 4 questions from slices 1 + 2
+    assert recorded[2]["n_prev"] == 4, (
+        "guardrail should contain questions from slices 1 and 2"
+    )
+    assert recorded[2]["n_cross"] == 4, (
+        "quality gate should check against questions from slices 1 and 2"
+    )
+
+
+def test_real_run_slices_cross_slice_duplicate_would_be_caught():
+    """
+    Verify that with cross_slice_accumulated set, a slice-2 batch that
+    exactly duplicates a slice-1 question arrives at run_per_batch_gate
+    with the cross-slice context present. We confirm this by inspecting
+    what effective_accumulated would be — the gate logic itself is already
+    tested in test_question_quality.py.
+    """
+    _ensure_llm_package_importable()
+    from unittest.mock import patch as mock_patch
+
+    cross_contexts = []
+
+    def fake_run_batched(topic, difficulty, n_q, source_text, *,
+                         cross_slice_accumulated=None, **kw):
+        cross_contexts.append(list(cross_slice_accumulated or []))
+        return {
+            "quiz_title": "T",
+            "questions": [
+                {"question": f"Q{len(cross_contexts)}?",
+                 "options": ["A", "B", "C", "D"], "correct_index": 0}
+                for _ in range(n_q)
+            ],
+        }
+
+    slices = [("ctx1", 1), ("ctx2", 1)]
+    with mock_patch("llm.batch_strategy.run_batched_generation",
+                    side_effect=fake_run_batched):
+        w = BackgroundGenerationWorker("Python", "easy", 2, source_slices=slices)
+        w.start()
+        time.sleep(0.3)
+
+    assert len(cross_contexts) == 2
+    # Slice 1 starts with empty cross-slice context
+    assert cross_contexts[0] == []
+    # Slice 2 receives slice 1's questions as cross-slice context
+    assert len(cross_contexts[1]) == 1
+    assert cross_contexts[1][0]["question"] == "Q1?"
+
+
 # ── Standalone runner ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

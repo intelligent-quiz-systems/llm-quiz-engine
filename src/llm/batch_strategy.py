@@ -91,6 +91,7 @@ def run_batched_generation(
     batch_size_steps: tuple = BATCH_SIZE_STEPS,
     max_single_attempts: int = MAX_SINGLE_ATTEMPTS,
     previous_questions: list[str] | None = None,
+    cross_slice_accumulated: list[dict] | None = None,
     state=None,           # optional GenerationState — populated when provided
     on_partial_ready=None,  # optional PartialReadyCallback — called after each accepted batch
 ) -> dict | None:
@@ -101,6 +102,11 @@ def run_batched_generation(
     Each quality error or output error causes immediate batch size reduction.
     Transient errors allow up to max_attempts_per_size retries before reducing.
     At batch_size=1, max_single_attempts consecutive fails trigger a halt.
+
+    cross_slice_accumulated: questions accepted by previous source slices.
+    When set, the quality gate checks new batches against both within-slice
+    accumulated questions AND these cross-slice questions, so duplicate and
+    similarity detection operates globally across the whole quiz.
 
     Returns a quiz dict {'quiz_title': ..., 'questions': [...]} or None if
     generation failed completely. The returned questions list may be shorter
@@ -186,7 +192,8 @@ def run_batched_generation(
                 decision = "reduce"
             else:
                 # ── Hard quality gate ────────────────────────────────────────
-                gate_issues = run_per_batch_gate(questions, accumulated)
+                effective_accumulated = accumulated + (cross_slice_accumulated or [])
+                gate_issues = run_per_batch_gate(questions, effective_accumulated)
                 hard_issues = [iss for iss in gate_issues if iss["severity"] == "error"]
                 if gate_issues:
                     print(format_quality_log(gate_issues))
