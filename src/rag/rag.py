@@ -327,3 +327,18 @@ def serialize_batches(batches: Iterable[RAGBatch]) -> list[dict]:
         )
 
     return serialized
+
+
+def distribute_questions(total_questions: int, batches: list[RAGBatch]) -> list[int]:
+    """
+    Distribute total_questions evenly across RAG batches.
+
+    Returns a list of per-batch question counts that sums to total_questions.
+    Earlier batches receive one extra question when the count doesn't divide evenly.
+    Returns an empty list if batches is empty.
+    """
+    n = len(batches)
+    if n == 0:
+        return []
+    base, remainder = divmod(total_questions, n)
+    return [base + (1 if i < remainder else 0) for i in range(n)]
