@@ -52,17 +52,28 @@ if st.session_state.app_step == "config":
     if config and config.get("submitted"):
         source_mode = config.get("source_mode")
         source_text = None
+        source_slices = None
         effective_topic = (config.get("topic") or "").strip()
 
         if source_mode == "Plik":
-            if config.get("source_file") is None:
+            source_file = config.get("source_file")
+            if source_file is None:
                 st.error("Aby wygenerować quiz z pliku, najpierw załaduj plik .txt lub .pdf.")
                 st.stop()
 
-            source_text, source_error = read_uploaded_source_file(config.get("source_file"))
+            source_text_raw, source_error = read_uploaded_source_file(source_file)
             if source_error:
                 st.error(source_error)
                 st.stop()
+
+            from rag.source_slices import build_source_slices_from_file
+            source_slices, slice_error = build_source_slices_from_file(
+                source_text_raw, source_file.name, config["question_count"]
+            )
+            if slice_error:
+                st.error(slice_error)
+                st.stop()
+
         elif not effective_topic:
             st.error("Aby wygenerować quiz z tematu, wpisz temat quizu.")
             st.stop()
@@ -83,6 +94,7 @@ if st.session_state.app_step == "config":
             difficulty=difficulty_en,
             num_questions=config["question_count"],
             source_text=source_text,
+            source_slices=source_slices,
         )
         worker.start()
 
