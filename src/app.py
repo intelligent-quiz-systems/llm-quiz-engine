@@ -53,6 +53,7 @@ if st.session_state.app_step == "config":
         source_mode = config.get("source_mode")
         source_text = None
         source_slices = None
+        st.session_state.rag_split_summary = None
         effective_topic = (config.get("topic") or "").strip()
 
         if source_mode == "Plik":
@@ -67,12 +68,13 @@ if st.session_state.app_step == "config":
                 st.stop()
 
             from rag.source_slices import build_source_slices_from_file
-            source_slices, slice_error = build_source_slices_from_file(
+            source_slices, slice_error, rag_split_summary = build_source_slices_from_file(
                 source_text_raw, source_file.name, config["question_count"]
             )
             if slice_error:
                 st.error(slice_error)
                 st.stop()
+            st.session_state.rag_split_summary = rag_split_summary
 
         elif not effective_topic:
             st.error("Aby wygenerować quiz z tematu, wpisz temat quizu.")
