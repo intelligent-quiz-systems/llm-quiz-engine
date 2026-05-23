@@ -16,3 +16,5 @@ QUIZ_SOURCE_CONTEXT_CHARS = 10000
 
 # Guardrail context — maximum number of prior questions forwarded to the model
 GUARDRAIL_MAX_QUESTIONS = 10
+# Question quality checks
+SIMILAR_QUESTION_THRESHOLD = 0.7   # Jaccard word-set similarity; pairs above this are flagged
