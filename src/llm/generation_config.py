@@ -12,13 +12,26 @@ LLM_TEMPERATURE = 0.7
 
 # Source context limits - how much of the uploaded text is passed to the model
 TOPIC_EXTRACTION_CHARS    = 2000
-QUIZ_SOURCE_CONTEXT_CHARS = 10000
+QUIZ_SOURCE_CONTEXT_CHARS = 10_000   # non-RAG (topic mode): how much source text reaches the prompt
+RAG_SOURCE_CONTEXT_CHARS  = 50_000   # RAG mode: max chars per source_slice passed to the prompt
 
 # Maximum extracted text size for RAG mode (chars after file extraction).
 # Checked in source_slices.py before the RAG pipeline runs.
-# Corresponds to ~25 000 tokens (chars / 4), which allows documents up to
-# ~100 000 characters — enough for most textbooks, articles, and manuals.
-MAX_EXTRACTED_SOURCE_CHARS = 100_000
+MAX_EXTRACTED_SOURCE_CHARS = 300_000
+
+# Minimum extracted text to accept a file at all.
+MIN_EXTRACTED_SOURCE_CHARS = 2_500
+
+# Quality thresholds for file→question mapping
+MIN_CHARS_PER_QUESTION    = 500    # hard floor: floor(chars/500) = max questions
+TARGET_CHARS_PER_QUESTION = 1_000  # soft target; informational only
+
+# RAG source-slice grouping constants
+RAG_LARGE_FILE_THRESHOLD         = 100_000  # chars — boundary between small/large file
+TARGET_QUESTIONS_PER_SLICE_SMALL = 10       # file < 100k chars: target q/slice
+TARGET_QUESTIONS_PER_SLICE_LARGE = 5        # file >= 100k chars: target q/slice
+MIN_SLICE_CHARS                  = 10_000   # a slice should contain at least this many chars
+MAX_SLICE_CHARS                  = 50_000   # = RAG_SOURCE_CONTEXT_CHARS; slices stay within prompt limit
 
 # Guardrail context - maximum number of prior questions forwarded to the model.
 # Set high so the LLM sees full quiz context even for large quizzes and CLI runs

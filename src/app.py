@@ -56,6 +56,14 @@ if st.session_state.app_step == "config":
         st.session_state.rag_split_summary = None
         effective_topic = (config.get("topic") or "").strip()
 
+        difficulty_pl = str(config["difficulty"])
+        difficulty_map = {
+            "Łatwy": "easy",
+            "Średni": "medium",
+            "Trudny": "hard"
+        }
+        difficulty_en = difficulty_map.get(difficulty_pl, difficulty_pl)
+
         if source_mode == "Plik":
             source_file = config.get("source_file")
             if source_file is None:
@@ -69,39 +77,37 @@ if st.session_state.app_step == "config":
 
             from rag.source_slices import build_source_slices_from_file
             source_slices, slice_error, rag_split_summary = build_source_slices_from_file(
-                source_text_raw, source_file.name, config["question_count"]
+                source_text_raw, source_file.name, config["question_count"], difficulty_en
             )
             if slice_error:
                 st.error(slice_error)
                 st.stop()
+            if rag_split_summary.get("questions_capped"):
+                st.info(rag_split_summary["clamp_warning"])
             st.session_state.rag_split_summary = rag_split_summary
 
         elif not effective_topic:
             st.error("Aby wygenerować quiz z tematu, wpisz temat quizu.")
             st.stop()
 
-        difficulty_pl = str(config["difficulty"])
-
-        difficulty_map = {
-            "Łatwy": "easy",
-            "Średni": "medium",
-            "Trudny": "hard"
-        }
-
-        difficulty_en = difficulty_map.get(difficulty_pl, difficulty_pl)
+        effective_question_count = (
+            st.session_state.rag_split_summary.get("questions_allowed", config["question_count"])
+            if st.session_state.rag_split_summary
+            else config["question_count"]
+        )
 
         from llm.background_worker import BackgroundGenerationWorker
         worker = BackgroundGenerationWorker(
             topic=effective_topic,
             difficulty=difficulty_en,
-            num_questions=config["question_count"],
+            num_questions=effective_question_count,
             source_text=source_text,
             source_slices=source_slices,
         )
         worker.start()
 
         st.session_state.generation_worker = worker
-        st.session_state.requested_question_count = config["question_count"]
+        st.session_state.requested_question_count = effective_question_count
         st.session_state.generation_final_status = None
         st.session_state.config = config
         st.session_state.app_step = "generating"

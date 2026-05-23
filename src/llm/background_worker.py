@@ -82,6 +82,12 @@ class BackgroundGenerationWorker:
         self._latest_partial = None
         self._error: str | None = None
 
+        # Per-slice diagnostic snapshots — populated by _real_run_slices.
+        # Each entry covers exactly one source_slice: its batch_log, rejection_log,
+        # final locked batch size, and generated question texts.
+        # Safe to read without a lock after is_done() returns True.
+        self._slice_diagnostics: list[dict] = []
+
     # ── Public API ────────────────────────────────────────────────────────────
 
     def start(self) -> None:
@@ -108,6 +114,24 @@ class BackgroundGenerationWorker:
         """Return True when the background thread has exited."""
         with self._lock:
             return self._worker_status == WorkerStatus.DONE
+
+    def get_slice_diagnostics(self) -> list[dict]:
+        """
+        Return per-slice diagnostic snapshots captured during _real_run_slices.
+
+        Each entry is a dict with keys:
+          slice_index          int   — 1-based
+          n_questions_target   int   — questions requested for this slice
+          n_questions_generated int  — questions actually produced
+          final_locked_batch_size int — last batch size used (reflects reduce steps)
+          batch_log            list  — BatchLogEntry dicts for this slice only
+          rejection_log        list  — RejectionLogEntry dicts for this slice only
+          question_texts       list[str] — generated question strings
+
+        Only populated after is_done() returns True.
+        Empty list in non-RAG mode (_real_run) or when _run_function is injected.
+        """
+        return list(self._slice_diagnostics)
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -199,6 +223,7 @@ class BackgroundGenerationWorker:
         from llm.generation_config import (
             INITIAL_BATCH_SIZE, FALLBACK_BATCH_SIZE,
             MIN_BATCH_SIZE, MAX_ATTEMPTS_PER_BATCH_SIZE,
+            RAG_SOURCE_CONTEXT_CHARS,
         )
         from llm.partial_loading import build_partial_result, build_final_result
         from llm.answer_shuffle import shuffle_quiz_options_balanced
@@ -206,17 +231,23 @@ class BackgroundGenerationWorker:
         state = create_state(
             self._topic, self._difficulty, self._num_questions, INITIAL_BATCH_SIZE
         )
+        self._slice_diagnostics = []
 
         all_questions: list[dict] = []
         quiz_title: str | None = None
 
-        for source_text, n_questions in self._source_slices:
+        for slice_idx, (source_text, n_questions) in enumerate(self._source_slices):
             if n_questions <= 0:
                 continue
 
             prev_question_texts = [
                 q.get("question", "") for q in all_questions if q.get("question")
             ]
+
+            # Snapshot list positions before this slice so we can extract its entries after.
+            batch_log_before    = len(state["batch_log"])
+            rejection_log_before = len(state["rejection_log"])
+            q_count_before      = len(all_questions)
 
             slice_quiz = run_batched_generation(
                 self._topic, self._difficulty, n_questions, source_text,
@@ -228,6 +259,7 @@ class BackgroundGenerationWorker:
                 cross_slice_accumulated=list(all_questions),
                 state=state,
                 on_partial_ready=None,
+                source_text_limit=RAG_SOURCE_CONTEXT_CHARS,
             )
 
             if slice_quiz:
@@ -237,6 +269,20 @@ class BackgroundGenerationWorker:
                 self._on_partial_ready(
                     build_partial_result(all_questions, quiz_title, state)
                 )
+
+            # Capture per-slice diagnostics by slicing the global log lists.
+            self._slice_diagnostics.append({
+                "slice_index":           slice_idx + 1,
+                "n_questions_target":    n_questions,
+                "n_questions_generated": len(all_questions) - q_count_before,
+                "final_locked_batch_size": state["final_locked_batch_size"],
+                "batch_log":    list(state["batch_log"][batch_log_before:]),
+                "rejection_log": list(state["rejection_log"][rejection_log_before:]),
+                "question_texts": [
+                    q.get("question", "")
+                    for q in all_questions[q_count_before:]
+                ],
+            })
 
         quiz_json = (
             {"quiz_title": quiz_title or f"Quiz: {self._topic}", "questions": all_questions}

@@ -334,6 +334,154 @@ def test_real_run_slices_cross_slice_duplicate_would_be_caught():
     assert cross_contexts[1][0]["question"] == "Q1?"
 
 
+# ── get_slice_diagnostics ─────────────────────────────────────────────────────
+
+def test_slice_diagnostics_empty_before_run():
+    """get_slice_diagnostics() returns empty list before worker starts."""
+    slices = [("ctx1", 2), ("ctx2", 2)]
+    w = BackgroundGenerationWorker("Python", "easy", 4, source_slices=slices)
+    assert w.get_slice_diagnostics() == []
+
+
+def test_slice_diagnostics_empty_for_non_rag_mode():
+    """Non-RAG mode (_run_function injected) leaves slice diagnostics empty."""
+    done = threading.Event()
+
+    def run(cb):
+        cb(_make_final(accepted=5, requested=5))
+        done.set()
+
+    w = BackgroundGenerationWorker("Python", "easy", 5, _run_function=run)
+    w.start()
+    done.wait(timeout=2.0)
+    time.sleep(0.05)
+    assert w.get_slice_diagnostics() == []
+
+
+def test_slice_diagnostics_count_matches_slices():
+    """One diagnostic entry per non-empty source_slice."""
+    _ensure_llm_package_importable()
+    from unittest.mock import patch as mock_patch
+
+    def fake_run(topic, difficulty, n_q, source_text, **kw):
+        return {
+            "quiz_title": "T",
+            "questions": [
+                {"question": f"Q{i}?", "options": ["A","B","C","D"], "correct_index": 0}
+                for i in range(n_q)
+            ],
+        }
+
+    slices = [("ctx1", 3), ("ctx2", 3), ("ctx3", 4)]
+    with mock_patch("llm.batch_strategy.run_batched_generation", side_effect=fake_run):
+        w = BackgroundGenerationWorker("Python", "easy", 10, source_slices=slices)
+        w.start()
+        time.sleep(0.5)
+
+    assert w.is_done()
+    diag = w.get_slice_diagnostics()
+    assert len(diag) == 3
+
+
+def test_slice_diagnostics_slice_indices():
+    """slice_index is 1-based and sequential."""
+    _ensure_llm_package_importable()
+    from unittest.mock import patch as mock_patch
+
+    def fake_run(topic, difficulty, n_q, source_text, **kw):
+        return {"quiz_title": "T", "questions": [
+            {"question": f"Q?", "options": ["A","B","C","D"], "correct_index": 0}
+            for _ in range(n_q)
+        ]}
+
+    slices = [("a", 2), ("b", 2)]
+    with mock_patch("llm.batch_strategy.run_batched_generation", side_effect=fake_run):
+        w = BackgroundGenerationWorker("Python", "easy", 4, source_slices=slices)
+        w.start()
+        time.sleep(0.4)
+
+    diag = w.get_slice_diagnostics()
+    assert diag[0]["slice_index"] == 1
+    assert diag[1]["slice_index"] == 2
+
+
+def test_slice_diagnostics_question_counts_sum():
+    """Sum of n_questions_generated across slices equals total questions."""
+    _ensure_llm_package_importable()
+    from unittest.mock import patch as mock_patch
+
+    def fake_run(topic, difficulty, n_q, source_text, **kw):
+        return {"quiz_title": "T", "questions": [
+            {"question": f"Q{i}?", "options": ["A","B","C","D"], "correct_index": 0}
+            for i in range(n_q)
+        ]}
+
+    slices = [("ctx1", 5), ("ctx2", 3), ("ctx3", 2)]
+    with mock_patch("llm.batch_strategy.run_batched_generation", side_effect=fake_run):
+        w = BackgroundGenerationWorker("Python", "easy", 10, source_slices=slices)
+        w.start()
+        time.sleep(0.5)
+
+    diag = w.get_slice_diagnostics()
+    total_generated = sum(d["n_questions_generated"] for d in diag)
+    assert total_generated == 10
+
+
+def test_slice_diagnostics_question_texts_match_count():
+    """question_texts length matches n_questions_generated for each slice."""
+    _ensure_llm_package_importable()
+    from unittest.mock import patch as mock_patch
+
+    def fake_run(topic, difficulty, n_q, source_text, **kw):
+        return {"quiz_title": "T", "questions": [
+            {"question": f"Pytanie {i}?", "options": ["A","B","C","D"], "correct_index": 0}
+            for i in range(n_q)
+        ]}
+
+    slices = [("ctx1", 4), ("ctx2", 3)]
+    with mock_patch("llm.batch_strategy.run_batched_generation", side_effect=fake_run):
+        w = BackgroundGenerationWorker("Python", "easy", 7, source_slices=slices)
+        w.start()
+        time.sleep(0.4)
+
+    diag = w.get_slice_diagnostics()
+    for entry in diag:
+        assert len(entry["question_texts"]) == entry["n_questions_generated"]
+        assert all(isinstance(t, str) for t in entry["question_texts"])
+
+
+def test_slice_diagnostics_no_cross_contamination():
+    """Batch log entries in slice N+1 do not appear in slice N's log."""
+    _ensure_llm_package_importable()
+    from unittest.mock import patch as mock_patch
+    from llm.generation_state import create_state, record_accepted_batch
+
+    call_order = []
+
+    def fake_run(topic, difficulty, n_q, source_text, *, state=None, **kw):
+        call_order.append(n_q)
+        if state is not None:
+            record_accepted_batch(state, len(state["batch_log"]) + 1, n_q, n_q, 1)
+        return {"quiz_title": "T", "questions": [
+            {"question": f"Q{len(call_order)}_{i}?", "options": ["A","B","C","D"], "correct_index": 0}
+            for i in range(n_q)
+        ]}
+
+    slices = [("ctx1", 3), ("ctx2", 4)]
+    with mock_patch("llm.batch_strategy.run_batched_generation", side_effect=fake_run):
+        w = BackgroundGenerationWorker("Python", "easy", 7, source_slices=slices)
+        w.start()
+        time.sleep(0.5)
+
+    diag = w.get_slice_diagnostics()
+    # Each slice should have exactly the batch entries recorded during its own call
+    assert len(diag[0]["batch_log"]) == 1
+    assert len(diag[1]["batch_log"]) == 1
+    # No cross-contamination: slice 1 batch accepted 3q, slice 2 batch accepted 4q
+    assert diag[0]["batch_log"][0]["accepted_questions"] == 3
+    assert diag[1]["batch_log"][0]["accepted_questions"] == 4
+
+
 # ── Standalone runner ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

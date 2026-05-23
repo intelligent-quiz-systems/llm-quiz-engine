@@ -92,8 +92,9 @@ def run_batched_generation(
     max_single_attempts: int = MAX_SINGLE_ATTEMPTS,
     previous_questions: list[str] | None = None,
     cross_slice_accumulated: list[dict] | None = None,
-    state=None,           # optional GenerationState — populated when provided
+    state=None,             # optional GenerationState — populated when provided
     on_partial_ready=None,  # optional PartialReadyCallback — called after each accepted batch
+    source_text_limit: int | None = None,  # chars to pass to prompt; None → QUIZ_SOURCE_CONTEXT_CHARS
 ) -> dict | None:
     """
     Generate quiz questions in batches with retry/fallback.
@@ -117,6 +118,7 @@ def run_batched_generation(
     from llm.quiz_model import Quiz
     from prompt_manager.manager import PromptManager
     from llm.generation_config import QUIZ_SOURCE_CONTEXT_CHARS, GUARDRAIL_MAX_QUESTIONS
+    _source_limit = source_text_limit if source_text_limit is not None else QUIZ_SOURCE_CONTEXT_CHARS
     from llm.guardrail import build_guardrail_context
     from llm.question_quality import run_per_batch_gate, format_quality_log
 
@@ -170,7 +172,7 @@ def run_batched_generation(
                 difficulty=difficulty,
                 num_questions=batch_size,
                 source_text=(
-                    source_text[:QUIZ_SOURCE_CONTEXT_CHARS]
+                    source_text[:_source_limit]
                     if source_text
                     else "No source text provided."
                 ),
