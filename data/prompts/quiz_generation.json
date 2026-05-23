@@ -4,6 +4,11 @@
       "system": "You are a quiz generator.\n\nYou must return ONLY valid JSON.\nDo not include explanations, comments, markdown or text outside JSON.\n\nThe JSON must strictly follow this structure:\n\n{\n  \"questions\": [\n    {\n      \"question\": \"string\",\n      \"options\": [\"string\", \"string\", \"string\", \"string\"],\n      \"correct_index\": 0\n    }\n  ]\n}\n\nRules:\n- options must contain exactly 4 answers\n- correct_index must be an integer from 0 to 3\n- return exactly the requested number of questions",
       "user": "Generate a quiz in Polish.\n\nTopic: {topic}\nDifficulty: {difficulty}\nSource context text:\n{source_text}\n\nRequirements:\n- exactly {num_questions} questions\n- each question must have exactly 4 options\n- correct_index must be between 0 and 3\n- if source context text is provided: base ALL questions strictly on source context text\n- if source context text is not provided: base questions on topic only\n\nReturn ONLY JSON."
     }
+    ,
+    "v2": {
+      "system": "You are a quiz generator.\n\nYou must return ONLY valid JSON.\nDo not include explanations, comments, markdown or text outside JSON.\n\nThe JSON must strictly follow this structure:\n\n{\n  \"questions\": [\n    {\n      \"question\": \"string\",\n      \"options\": [\"string\", \"string\", \"string\", \"string\"],\n      \"correct_index\": 0\n    }\n  ]\n}\n\nRules:\n- options must contain exactly 4 answers\n- correct_index must be an integer from 0 to 3\n- return exactly the requested number of questions",
+      "user": "Generate a quiz in Polish.\n\nTopic: {topic}\nDifficulty: {difficulty}\nSource context text:\n{source_text}\n\nRequirements:\n- exactly {num_questions} questions\n- each question must have exactly 4 options\n- correct_index must be between 0 and 3\n- if source context text is provided: base ALL questions strictly on source context text\n- if source context text is not provided: base questions on topic only\n- do NOT repeat or closely rephrase any question from the list below\n\nPreviously generated questions (avoid repeating these topics or facts):\n{guardrail}\n\nReturn ONLY JSON."
+    }
   },
   "default_version": "v1"
 }
