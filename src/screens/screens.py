@@ -121,6 +121,10 @@ def init_state():
         "generation_worker": None,
         "requested_question_count": 0,
         "generation_final_status": None,
+        
+        # === STANY DLA SYSTEMU PODPOWIEDZI ===
+        "hint_usage": {},      # ile podpowiedzi użyto na pytanie (q_index -> int)
+        "shown_hints": {},     # lista pokazanych podpowiedzi (q_index -> list of dicts)
     }
 
     for key, value in defaults.items():
@@ -541,6 +545,14 @@ def render_quiz_screen(quiz, config):
 
     st.title(quiz.get("quiz_title", quiz.get("topic", "Quiz")))
 
+    # === ZASADY PUNKTACJI (zwijane) ===
+    with st.expander("📋 Zasady punktacji", expanded=True):
+        st.markdown("""
+        • **Poprawna odpowiedź:** +1 punkt  
+        • **Niepoprawna odpowiedź:** 0 punktów  
+        • **Każda podpowiedź:** -0.5 punktu
+        """)
+
     if st.session_state.get("generation_worker") is not None:
         requested = st.session_state.get("requested_question_count", len(questions))
         st.info(
@@ -561,24 +573,65 @@ def render_quiz_screen(quiz, config):
 
     for i in range(start, end):
         q = questions[i]
+        q_index = i
 
-        _prepare_widget_value(i)
+        _prepare_widget_value(q_index)
 
         st.markdown("<div class='question-card'>", unsafe_allow_html=True)
-        st.markdown(f"### Pytanie {i + 1}")
+        st.markdown(f"### Pytanie {q_index + 1}")
         st.write(q["question"])
 
+        # === Przycisk Podpowiedź ===
+        col_hint, col_remaining = st.columns([3, 1])
+        with col_hint:
+            used_hints = st.session_state.hint_usage.get(q_index, 0)
+            if used_hints < 3:
+                if st.button("🧠 Podpowiedź", key=f"hint_btn_{q_index}", use_container_width=True):
+                    hint_levels = ["easy", "medium", "strong"]
+                    hint_level = hint_levels[used_hints]
+                    
+                    context = None
+                    hint_text = generate_hint(
+                        question=q["question"],
+                        options=q["options"],
+                        correct_answer=q["options"][q["correct_index"]],
+                        context=context,
+                        hint_level=hint_level
+                    )
+
+                    if hint_text:
+                        if q_index not in st.session_state.shown_hints:
+                            st.session_state.shown_hints[q_index] = []
+                        
+                        st.session_state.shown_hints[q_index].append({
+                            "level": hint_level,
+                            "text": hint_text
+                        })
+                        st.session_state.hint_usage[q_index] = used_hints + 1
+                        st.rerun()
+
+        with col_remaining:
+            remaining = 3 - st.session_state.hint_usage.get(q_index, 0)
+            st.caption(f"**{remaining}** podpowiedzi pozostałe")
+
+        # Wyświetlanie wszystkich podpowiedzi
+        if q_index in st.session_state.shown_hints and st.session_state.shown_hints[q_index]:
+            for idx, hint in enumerate(st.session_state.shown_hints[q_index], 1):
+                level_name = {"easy": "Łatwa", "medium": "Średnia", "strong": "Mocna"}[hint["level"]]
+                st.info(f"**Podpowiedź {idx} ({level_name}):** {hint['text']}")
+
+        # Opcje odpowiedzi
         st.radio(
-            f"Odpowiedź dla pytania {i + 1}",
+            f"Odpowiedź dla pytania {q_index + 1}",
             q["options"],
-            key=f"widget_q_{i}",
+            key=f"widget_q_{q_index}",
             format_func=lambda x, opts=q["options"]: format_option_with_letter(opts, x),
             on_change=_persist_widget_value,
-            args=(i,),
+            args=(q_index,),
             label_visibility="collapsed",
         )
 
-        _persist_widget_value(i)
+        _persist_widget_value(q_index)
         st.markdown("</div>", unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns(3)
@@ -605,16 +658,25 @@ def render_quiz_screen(quiz, config):
 
 
 def calculate_score(quiz):
-    score = 0
+    """Oblicza wynik z uwzględnieniem kar za podpowiedzi"""
+    score = 0.0
+    max_score = len(quiz["questions"])
 
     for i, q in enumerate(quiz["questions"]):
         correct = q["options"][q["correct_index"]]
         answer = st.session_state.answers.get(i)
 
         if answer == correct:
-            score += 1
+            score += 1.0
 
-    return score
+    # Odejmij punkty za podpowiedzi
+    for q_index, used in st.session_state.hint_usage.items():
+        score -= used * 0.5
+
+    # Nie zezwalamy na wynik poniżej 0
+    score = max(0.0, score)
+
+    return score, max_score
 
 def build_history_entry(quiz, config, score):
     total = len(quiz.get("questions", []))
