@@ -449,19 +449,23 @@ def format_option_with_letter(options, option_value):
 
 
 def reset_quiz_state():
+    """Resetuje cały stan quizu, w tym hinty i punktację."""
     st.session_state.quiz_deadline = None
     st.session_state.answers = {}
     st.session_state.current_page = 0
     st.session_state.timeout_happened = False
     st.session_state.quiz_started_at = None
     st.session_state.history_saved = False
-    st.session_state.generation_worker = None
-    st.session_state.generation_final_status = None
-    st.session_state.requested_question_count = 0
+    
+    # Ważne: czyszczenie hintów
+    st.session_state.hint_usage = {}
+    st.session_state.shown_hints = {}
 
+    # Usuwanie widget keys
     keys_to_remove = [k for k in st.session_state.keys() if k.startswith("widget_q_")]
     for key in keys_to_remove:
-        del st.session_state[key]
+        if key in st.session_state:
+            del st.session_state[key]
 
 
 def render_sidebar_timer():
@@ -581,40 +585,47 @@ def render_quiz_screen(quiz, config):
         st.markdown(f"### Pytanie {q_index + 1}")
         st.write(q["question"])
 
-        # === Przycisk Podpowiedź ===
+        # === Przycisk Podpowiedź (mniejszy, z spinnerem) ===
+        used_hints = st.session_state.hint_usage.get(q_index, 0)
+        remaining = 3 - used_hints
+
         col_hint, col_remaining = st.columns([3, 1])
         with col_hint:
-            used_hints = st.session_state.hint_usage.get(q_index, 0)
             if used_hints < 3:
-                if st.button("🧠 Podpowiedź", key=f"hint_btn_{q_index}", use_container_width=True):
-                    hint_levels = ["easy", "medium", "strong"]
-                    hint_level = hint_levels[used_hints]
-                    
-                    context = None
-                    hint_text = generate_hint(
-                        question=q["question"],
-                        options=q["options"],
-                        correct_answer=q["options"][q["correct_index"]],
-                        context=context,
-                        hint_level=hint_level
-                    )
-
-                    if hint_text:
-                        if q_index not in st.session_state.shown_hints:
-                            st.session_state.shown_hints[q_index] = []
+                if st.button(
+                    "🧠 Podpowiedź", 
+                    key=f"hint_btn_{q_index}",
+                    use_container_width=False,
+                    type="secondary"
+                ):
+                    with st.spinner("Generowanie podpowiedzi..."):
+                        hint_levels = ["easy", "medium", "strong"]
+                        hint_level = hint_levels[used_hints]
                         
-                        st.session_state.shown_hints[q_index].append({
-                            "level": hint_level,
-                            "text": hint_text
-                        })
-                        st.session_state.hint_usage[q_index] = used_hints + 1
-                        st.rerun()
+                        context = None
+                        hint_text = generate_hint(
+                            question=q["question"],
+                            options=q["options"],
+                            correct_answer=q["options"][q["correct_index"]],
+                            context=context,
+                            hint_level=hint_level
+                        )
+
+                        if hint_text:
+                            if q_index not in st.session_state.shown_hints:
+                                st.session_state.shown_hints[q_index] = []
+                            
+                            st.session_state.shown_hints[q_index].append({
+                                "level": hint_level,
+                                "text": hint_text
+                            })
+                            st.session_state.hint_usage[q_index] = used_hints + 1
+                            st.rerun()
 
         with col_remaining:
-            remaining = 3 - st.session_state.hint_usage.get(q_index, 0)
             st.caption(f"**{remaining}** podpowiedzi pozostałe")
 
-        # Wyświetlanie wszystkich podpowiedzi
+        # Wyświetlanie wszystkich dotychczasowych podpowiedzi
         if q_index in st.session_state.shown_hints and st.session_state.shown_hints[q_index]:
             for idx, hint in enumerate(st.session_state.shown_hints[q_index], 1):
                 level_name = {"easy": "Łatwa", "medium": "Średnia", "strong": "Mocna"}[hint["level"]]
@@ -708,24 +719,42 @@ def render_results_screen(quiz, config):
 
     st.title("Wyniki quizu")
 
-    score = calculate_score(quiz)
-    total = len(quiz["questions"])
+    # Poprawne wywołanie calculate_score (zwraca tuple)
+    score, total = calculate_score(quiz)
 
+    # Zapisz do historii
     if not st.session_state.history_saved:
         append_attempt(build_history_entry(quiz, config, score))
         st.session_state.history_saved = True 
 
+    # === LEWA KOLUMNA - SZCZEGÓŁOWA PUNKTACJA ===
     with st.sidebar:
         st.header("Wyniki")
-        st.progress(score / total if total > 0 else 0.0, text=f"Poprawne: {score}/{total}")
+        
+        correct_answers = sum(1 for i, q in enumerate(quiz["questions"]) 
+                            if st.session_state.answers.get(i) == q["options"][q["correct_index"]])
+        
+        total_hints_used = sum(st.session_state.hint_usage.get(i, 0) for i in range(total))
+        hint_penalty = total_hints_used * 0.5
+
+        st.progress(score / total if total > 0 else 0.0, 
+                   text=f"**{score:.1f} / {total}**")
+        
+        st.write("**Szczegóły punktacji:**")
+        st.write(f"✅ Poprawne odpowiedzi: **{correct_answers}** × 1 pkt = **{correct_answers} pkt**")
+        st.write(f"❌ Niepoprawne odpowiedzi: **{total - correct_answers}** × 0 pkt = **0 pkt**")
+        st.write(f"🧠 Zużyte podpowiedzi: **{total_hints_used}** × -0.5 pkt = **-{hint_penalty:.1f} pkt**")
+        
+        st.divider()
+
         st.write(f"**Temat:** {quiz.get('topic') or quiz.get('quiz_title', 'Quiz')}")
         st.write(f"**Trudność:** {difficulty_label(config.get('difficulty'))}")
         st.write(f"**Limit czasu:** {config.get('time_limit', DEFAULT_TIME_LIMIT_MINUTES)} min")
 
+        st.divider()
+
     if st.session_state.timeout_happened:
         st.warning("Czas minął. Quiz został zakończony automatycznie.")
-
-    st.success(f"Wynik: {score}/{total}")
 
     for i, q in enumerate(quiz["questions"]):
         correct = q["options"][q["correct_index"]]
