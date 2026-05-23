@@ -1,7 +1,6 @@
 import json
 import sys
 from pathlib import Path
-from pydantic import ValidationError
 
 SRC_DIR = Path(__file__).resolve().parents[1]  # src
 
@@ -11,6 +10,7 @@ if str(SRC_DIR) not in sys.path:
 from llm.llm_client import run_prompt
 from llm.quiz_model import Quiz, TopicFromText
 from llm.generation_config import TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS
+from llm.provider_errors import classify_provider_error, format_error_log
 
 # Import Prompt Managera
 from prompt_manager.manager import PromptManager
@@ -36,7 +36,9 @@ def extract_topic_from_text(source_text: str) -> str | None:
         response = TopicFromText.model_validate(response_json)
         topic = response.topic.strip()
         return topic if topic else None
-    except Exception:
+    except Exception as e:
+        info = classify_provider_error(e)
+        print(format_error_log(info))
         return None
 
 
@@ -76,12 +78,9 @@ def generate_quiz(
 
         return quiz_json
 
-    except ValidationError as e:
-        print("Validation error:", e)
-        return None
-
     except Exception as e:
-        print("LLM error:", e)
+        info = classify_provider_error(e)
+        print(format_error_log(info))
         return None
 
 
