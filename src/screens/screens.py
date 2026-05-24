@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from history.history import append_attempt, load_history
 from llm.partial_loading import GenerationStatus
+from llm.llm import generate_hint
 
 QUIZ_PAGE_SIZE = 3
 OPTION_LABELS = ["A", "B", "C", "D", "E", "F"]

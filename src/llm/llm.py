@@ -23,6 +23,7 @@ from llm.answer_shuffle import shuffle_quiz_options_balanced
 from llm.batch_strategy import run_batched_generation
 from llm.generation_state import create_state, format_state_summary
 from llm.question_quality import run_quality_checks, format_quality_log
+from llm.llm_client import run_prompt, run_text_prompt
 
 # Import Prompt Managera
 from prompt_manager.manager import PromptManager
@@ -157,8 +158,8 @@ def generate_hint(
         return "Nie udało się wygenerować podpowiedzi."
 
     try:
-        hint_text = run_prompt(built["system"], built["user"], None)
-        return hint_text.strip() if hint_text else None
+        hint_text = run_text_prompt(built["system"], built["user"])
+        return hint_text if hint_text else None
     except Exception as e:
         print(f"Błąd podczas generowania podpowiedzi: {e}")
         return "Nie udało się wygenerować podpowiedzi w tej chwili."
