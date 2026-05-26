@@ -111,6 +111,7 @@ def load_llm_module(
     mod_pm        = ModuleType("prompt_manager.manager")
 
     mod_client.run_prompt                    = fake_run_prompt
+    mod_client.run_text_prompt               = Mock()
     mod_model.Quiz                           = fake_quiz_class
     mod_model.TopicFromText                  = FakeTopicFromText
     mod_batch.run_batched_generation         = mock_run_batched
