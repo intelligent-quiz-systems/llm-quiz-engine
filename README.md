@@ -49,4 +49,4 @@ http://localhost:8502/
 - Artur `Arturstrag`: unit tests, quiz history, RAG foundation, source chunking/batching pipeline, source processing.
 - Joanna Czarnocka `joannaczarnocka`: calling LLM with Pydantic validation, UI screens in streamlit (configuration, actual quiz and summary), loading input files(txt or pdf) to context to generate quiz from them.
 - Krystian Oberland `krystian-oberland`: LLM integration, retry/reduce/fallback flow, generation state & batch logs, partial loading with background worker, diagnostics & observability, quality checks & guardrails, RAG runtime integration.
-- Magdalena `magbor1`: prompt manager, AI hint system, scoring details UI, hint penalties.
+- Magdalena Borsuk `magbor1`: prompt manager, AI hint system, scoring details UI, hint penalties.
