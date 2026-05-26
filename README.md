@@ -46,7 +46,7 @@ http://localhost:8502/
 
 ## Contributors
 
-- Artur `Arturstrag`: unit tests, quiz history, ...
-- Joanna Czarnocka `joannaczarnocka`: calling LLM with Pydantic validation, UI screens in streamlit (configuration, actual quiz and summary), loading input files(txt or pdf) to context to generate quiz from them, ...
-- Krystian `krystian-oberland`: integration with LLM, worker, fallback/reduce, quality checks, guardrail, ...
-- Magdalena Borsuk `magbor1`: prompt manager, integration with prompt manager, hint system
+- Artur `Arturstrag`: unit tests, quiz history, RAG foundation, source chunking/batching pipeline, source processing.
+- Joanna Czarnocka `joannaczarnocka`: calling LLM with Pydantic validation, UI screens in streamlit (configuration, actual quiz and summary), loading input files(txt or pdf) to context to generate quiz from them.
+- Krystian Oberland `krystian-oberland`: LLM integration, retry/reduce/fallback flow, generation state & batch logs, partial loading with background worker, diagnostics & observability, quality checks & guardrails, RAG runtime integration.
+- Magdalena `magbor1`: prompt manager, AI hint system, scoring details UI, hint penalties.
