@@ -16,27 +16,32 @@ def _setup_src_path() -> None:
         sys.path.insert(0, str(src))
 
 
+class _Tee:
+    def __init__(self, original, buffer: StringIO) -> None:
+        self._original = original
+        self._buffer = buffer
+
+    def write(self, data: str) -> None:
+        try:
+            self._original.write(data)
+        except UnicodeEncodeError:
+            self._original.write(data.encode("ascii", errors="replace").decode("ascii"))
+        self._buffer.write(data)
+
+    def flush(self) -> None:
+        self._original.flush()
+
+    def __getattr__(self, name: str):
+        return getattr(self._original, name)
+
+
 @contextmanager
 def _capture_stdout(log_path: Path):
     """Tee stdout to a log file while keeping terminal output."""
     buf = StringIO()
     old = sys.stdout
 
-    class _Tee:
-        def write(self, data: str) -> None:
-            try:
-                old.write(data)
-            except UnicodeEncodeError:
-                old.write(data.encode("ascii", errors="replace").decode("ascii"))
-            buf.write(data)
-
-        def flush(self) -> None:
-            old.flush()
-
-        def __getattr__(self, name: str):
-            return getattr(old, name)
-
-    sys.stdout = _Tee()
+    sys.stdout = _Tee(old, buf)
     try:
         yield buf
     finally:
