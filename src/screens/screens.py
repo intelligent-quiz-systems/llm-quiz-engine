@@ -458,6 +458,11 @@ def reset_quiz_state():
     st.session_state.quiz_started_at = None
     st.session_state.history_saved = False
     
+    # Linie dodane według sugestii grupy:
+    st.session_state.generation_worker = None
+    st.session_state.generation_final_status = None
+    st.session_state.requested_question_count = 0
+
     # Ważne: czyszczenie hintów
     st.session_state.hint_usage = {}
     st.session_state.shown_hints = {}
