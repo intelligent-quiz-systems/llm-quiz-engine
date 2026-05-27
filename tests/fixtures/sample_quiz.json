@@ -1,0 +1,24 @@
+{
+  "questions": [
+    {
+      "question": "Co to jest lista w Pythonie?",
+      "options": [
+        "Niemutowalny typ danych",
+        "Mutowalny typ sekwencyjny",
+        "Typ słownikowy",
+        "Typ logiczny"
+      ],
+      "correct_index": 1
+    },
+    {
+      "question": "Który operator służy do potęgowania w Pythonie?",
+      "options": ["^", "**", "^^", "pow()"],
+      "correct_index": 1
+    },
+    {
+      "question": "Jak sprawdzić długość listy w Pythonie?",
+      "options": ["list.length()", "size(list)", "len(list)", "list.size"],
+      "correct_index": 2
+    }
+  ]
+}
