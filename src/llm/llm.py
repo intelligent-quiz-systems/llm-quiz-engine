@@ -33,7 +33,7 @@ def extract_topic_from_text(source_text: str) -> str | None:
     )
 
     if not built:
-        print("Błąd: nie udało się pobrać promptu topic_extraction")
+        print("[ERR] Failed to load prompt: topic_extraction")
         return None
 
     try:
@@ -45,40 +45,49 @@ def extract_topic_from_text(source_text: str) -> str | None:
         return None
 
 
+def _post_process_quiz(quiz_json: dict) -> dict | None:
+    """Validate Pydantic model and log the final quiz. Returns None on failure."""
+    try:
+        Quiz.model_validate(quiz_json)
+    except ValidationError as e:
+        print("Validation error:", e)
+        return None
+    print("\n===== VALIDATED QUIZ JSON =====")
+    print(json.dumps(quiz_json, indent=2, ensure_ascii=False))
+    return quiz_json
+
+
 def generate_quiz(
     topic: str,
     difficulty: str,
     num_questions: int,
     source_text: str | None = None,
 ) -> dict | None:
-
+    """
+    Orchestrate synchronous quiz generation.
+    For background generation use BackgroundGenerationWorker from background_worker.
+    """
     state = create_state(topic, difficulty, num_questions, INITIAL_BATCH_SIZE)
 
-    quiz_json = run_batched_generation(
-        topic, difficulty, num_questions, source_text,
-        initial_batch_size=INITIAL_BATCH_SIZE,
-        fallback_batch_size=FALLBACK_BATCH_SIZE,
-        min_batch_size=MIN_BATCH_SIZE,
-        max_attempts_per_size=MAX_ATTEMPTS_PER_BATCH_SIZE,
-        state=state,
-    )
+    try:
+        quiz_json = run_batched_generation(
+            topic, difficulty, num_questions, source_text,
+            initial_batch_size=INITIAL_BATCH_SIZE,
+            fallback_batch_size=FALLBACK_BATCH_SIZE,
+            min_batch_size=MIN_BATCH_SIZE,
+            max_attempts_per_size=MAX_ATTEMPTS_PER_BATCH_SIZE,
+            state=state,
+        )
+    except Exception as e:
+        print("Generation error:", e)
+        return None
 
     print(format_state_summary(state))
 
     if quiz_json is None:
         return None
 
-    try:
-        Quiz.model_validate(quiz_json)
-    except ValidationError as e:
-        print("Validation error:", e)
-        return None
-
-    formatted_quiz_json = json.dumps(quiz_json, indent=2, ensure_ascii=False)
-    print("\n===== VALIDATED QUIZ JSON =====")
-    print(formatted_quiz_json)
-
-    return quiz_json
+    return _post_process_quiz(quiz_json)
 
 
 if __name__ == "__main__":
