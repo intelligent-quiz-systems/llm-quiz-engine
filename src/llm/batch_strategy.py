@@ -149,7 +149,7 @@ def run_batched_generation(
                 guardrail=guardrail_text,
             )
             if not built:
-                print("[batch] prompt build failed — halting")
+                print("[batch] prompt build failed - halting")
                 break
 
             _s_chars = len(built["system"])
@@ -184,7 +184,7 @@ def run_batched_generation(
                 current_batch += 1
                 batch_attempt_count = 0
                 attempts_at_size = 0
-                print(f"[batch] accepted {len(questions)}q — total {len(accumulated)}/{num_questions}")
+                print(f"[batch] accepted {len(questions)}q - total {len(accumulated)}/{num_questions}")
                 if on_partial_ready is not None and state is not None:
                     from llm.partial_loading import build_partial_result, should_return_partial
                     if should_return_partial(state):
@@ -194,7 +194,7 @@ def run_batched_generation(
         except Exception as exc:
             _attempt_dur = round(time.monotonic() - _attempt_start, 3)
             decision = classify_exception(exc)
-            print(f"[batch] {type(exc).__name__} → {decision}")
+            print(f"[batch] {type(exc).__name__} -> {decision}")
             if state is not None:
                 record_rejection(
                     state, current_batch, batch_attempt_count, batch_size, decision, type(exc).__name__,
@@ -213,11 +213,11 @@ def run_batched_generation(
         if should_reduce(decision, attempts_at_size, max_attempts_per_size):
             new_size = reduce_batch_size(locked_size, fallback_batch_size, min_batch_size)
             if new_size < locked_size:
-                print(f"[batch] reducing {locked_size} → {new_size}")
+                print(f"[batch] reducing {locked_size} -> {new_size}")
                 locked_size = new_size
                 attempts_at_size = 0
             else:
-                print("[batch] already at minimum batch size — halting")
+                print("[batch] already at minimum batch size - halting")
                 break
         # else: "retry" → loop continues with same locked_size
 

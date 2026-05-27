@@ -46,8 +46,6 @@ def run_prompt(
         temperature=LLM_TEMPERATURE,
     )
 
-    print("\n===== RAW LLM RESPONSE =====")
-    print(response)
 
     parsed_obj = response.output_parsed
 
