@@ -13,9 +13,11 @@ from llm.quiz_model import Quiz, TopicFromText
 from llm.generation_config import (
     TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS,
     INITIAL_BATCH_SIZE, FALLBACK_BATCH_SIZE, MIN_BATCH_SIZE, MAX_ATTEMPTS_PER_BATCH_SIZE,
+    SIMILAR_QUESTION_THRESHOLD,
 )
 from llm.batch_strategy import run_batched_generation
 from llm.generation_state import create_state, format_state_summary
+from llm.question_quality import run_quality_checks, format_quality_log
 
 # Import Prompt Managera
 from prompt_manager.manager import PromptManager
@@ -45,13 +47,21 @@ def extract_topic_from_text(source_text: str) -> str | None:
         return None
 
 
-def _post_process_quiz(quiz_json: dict) -> dict | None:
-    """Validate Pydantic model and log the final quiz. Returns None on failure."""
+def _post_process_quiz(quiz_json: dict, diagnostics_out: dict | None = None) -> dict | None:
+    """Validate Pydantic model, run quality checks, and log the final quiz."""
     try:
         Quiz.model_validate(quiz_json)
     except ValidationError as e:
         print("Validation error:", e)
         return None
+    issues = run_quality_checks(
+        quiz_json.get("questions", []),
+        similar_threshold=SIMILAR_QUESTION_THRESHOLD,
+    )
+    if issues:
+        print(format_quality_log(issues))
+    if diagnostics_out is not None:
+        diagnostics_out["quality_issues"] = [dict(i) for i in issues]
     print("\n===== VALIDATED QUIZ JSON =====")
     print(json.dumps(quiz_json, indent=2, ensure_ascii=False))
     return quiz_json
@@ -99,7 +109,7 @@ def generate_quiz(
     if quiz_json is None:
         return None
 
-    return _post_process_quiz(quiz_json)
+    return _post_process_quiz(quiz_json, diagnostics_out=diagnostics_out)
 
 
 if __name__ == "__main__":
