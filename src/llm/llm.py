@@ -10,14 +10,17 @@ if str(SRC_DIR) not in sys.path:
 
 from llm.llm_client import run_prompt
 from llm.quiz_model import Quiz, TopicFromText
+from llm.provider_errors import classify_provider_error, format_error_log
 from llm.generation_config import (
     TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS,
+    SIMILAR_QUESTION_THRESHOLD, GUARDRAIL_MAX_QUESTIONS,
     INITIAL_BATCH_SIZE, FALLBACK_BATCH_SIZE, MIN_BATCH_SIZE, MAX_ATTEMPTS_PER_BATCH_SIZE,
-    SIMILAR_QUESTION_THRESHOLD,
 )
+from llm.question_quality import run_quality_checks, format_quality_log
+from llm.guardrail import build_guardrail_context, extract_question_texts, format_guardrail_log
+from llm.answer_shuffle import shuffle_quiz_options_balanced
 from llm.batch_strategy import run_batched_generation
 from llm.generation_state import create_state, format_state_summary
-from llm.question_quality import run_quality_checks, format_quality_log
 
 # Import Prompt Managera
 from prompt_manager.manager import PromptManager
@@ -62,6 +65,17 @@ def _post_process_quiz(quiz_json: dict, diagnostics_out: dict | None = None) -> 
         print(format_quality_log(issues))
     if diagnostics_out is not None:
         diagnostics_out["quality_issues"] = [dict(i) for i in issues]
+    # Shuffle after quality checks: content is validated, now randomise option positions.
+    # Balanced shuffle prevents the model's bias of placing correct answers at index 0.
+    import os, collections
+    _debug_shuffle = os.environ.get("DEBUG_SHUFFLE") == "1"
+    if _debug_shuffle:
+        _before = collections.Counter(q.get("correct_index", -1) for q in quiz_json.get("questions", []))
+    quiz_json = shuffle_quiz_options_balanced(quiz_json)
+    if _debug_shuffle:
+        _after = collections.Counter(q.get("correct_index", -1) for q in quiz_json.get("questions", []))
+        _n = len(quiz_json.get("questions", []))
+        print(f"[shuffle] n={_n} before={dict(sorted(_before.items()))} after={dict(sorted(_after.items()))}")
     print("\n===== VALIDATED QUIZ JSON =====")
     print(json.dumps(quiz_json, indent=2, ensure_ascii=False))
     return quiz_json

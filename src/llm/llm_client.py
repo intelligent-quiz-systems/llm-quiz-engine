@@ -46,7 +46,6 @@ def run_prompt(
         temperature=LLM_TEMPERATURE,
     )
 
-
     parsed_obj = response.output_parsed
 
     if not include_metadata:

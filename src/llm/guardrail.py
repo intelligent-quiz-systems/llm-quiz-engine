@@ -11,7 +11,7 @@ from typing import TypedDict
 
 # Module-level default — matches generation_config.GUARDRAIL_MAX_QUESTIONS.
 # Defined here so this module can be imported without loading the llm package init.
-GUARDRAIL_MAX_QUESTIONS: int = 10
+GUARDRAIL_MAX_QUESTIONS: int = 100
 
 _EMPTY_TEXT = "(none)"
 

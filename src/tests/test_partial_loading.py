@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src" / "llm"))
 from generation_state import create_state, record_accepted_batch, record_rejection
 from partial_loading import (
-    STATUS_RUNNING, STATUS_PARTIAL, STATUS_COMPLETED, STATUS_HALTED, STATUS_FAILED,
+    GenerationStatus,
     FINAL_STATUSES,
     determine_final_status,
     should_return_partial,
@@ -37,22 +37,22 @@ def _questions(n: int) -> list[dict]:
 
 def test_final_status_completed():
     s = _state(requested=10, accepted=10)
-    assert determine_final_status(s) == STATUS_COMPLETED
+    assert determine_final_status(s) == GenerationStatus.COMPLETED
 
 
 def test_final_status_completed_overshoot():
     s = _state(requested=10, accepted=12)  # rare but possible
-    assert determine_final_status(s) == STATUS_COMPLETED
+    assert determine_final_status(s) == GenerationStatus.COMPLETED
 
 
 def test_final_status_halted_when_partial():
     s = _state(requested=20, accepted=10)
-    assert determine_final_status(s) == STATUS_HALTED
+    assert determine_final_status(s) == GenerationStatus.HALTED
 
 
 def test_final_status_failed_when_zero():
     s = _state(requested=20, accepted=0)
-    assert determine_final_status(s) == STATUS_FAILED
+    assert determine_final_status(s) == GenerationStatus.FAILED
 
 
 # ── should_return_partial ─────────────────────────────────────────────────────
@@ -79,14 +79,14 @@ def test_partial_result_mid_generation_status():
     s = _state(requested=20, accepted=10)
     questions = _questions(10)
     result = build_partial_result(questions, "My Quiz", s, is_final=False)
-    assert result["status"] == STATUS_PARTIAL
+    assert result["status"] == GenerationStatus.PARTIAL
     assert result["is_final"] is False
 
 
 def test_partial_result_running_status_when_no_questions():
     s = _state(requested=20, accepted=0)
     result = build_partial_result([], None, s, is_final=False)
-    assert result["status"] == STATUS_RUNNING
+    assert result["status"] == GenerationStatus.RUNNING
     assert result["is_final"] is False
 
 
@@ -124,35 +124,35 @@ def test_partial_result_questions_are_snapshot():
 def test_final_result_completed():
     s = _state(requested=10, accepted=10)
     result = build_final_result(_questions(10), "T", s)
-    assert result["status"] == STATUS_COMPLETED
+    assert result["status"] == GenerationStatus.COMPLETED
     assert result["is_final"] is True
 
 
 def test_final_result_halted():
     s = _state(requested=20, accepted=8)
     result = build_final_result(_questions(8), "T", s)
-    assert result["status"] == STATUS_HALTED
+    assert result["status"] == GenerationStatus.HALTED
     assert result["is_final"] is True
 
 
 def test_final_result_failed():
     s = _state(requested=20, accepted=0)
     result = build_final_result([], None, s)
-    assert result["status"] == STATUS_FAILED
+    assert result["status"] == GenerationStatus.FAILED
     assert result["is_final"] is True
 
 
 # ── FINAL_STATUSES set ────────────────────────────────────────────────────────
 
 def test_final_statuses_contains_terminal_values():
-    assert STATUS_COMPLETED in FINAL_STATUSES
-    assert STATUS_HALTED    in FINAL_STATUSES
-    assert STATUS_FAILED    in FINAL_STATUSES
+    assert GenerationStatus.COMPLETED in FINAL_STATUSES
+    assert GenerationStatus.HALTED    in FINAL_STATUSES
+    assert GenerationStatus.FAILED    in FINAL_STATUSES
 
 
 def test_in_progress_statuses_not_final():
-    assert STATUS_RUNNING not in FINAL_STATUSES
-    assert STATUS_PARTIAL not in FINAL_STATUSES
+    assert GenerationStatus.RUNNING not in FINAL_STATUSES
+    assert GenerationStatus.PARTIAL not in FINAL_STATUSES
 
 
 # ── Standalone runner ─────────────────────────────────────────────────────────

@@ -87,7 +87,7 @@ def test_empty_string_questions_skipped():
 
 
 def test_default_max_matches_config():
-    assert GUARDRAIL_MAX_QUESTIONS == 10
+    assert GUARDRAIL_MAX_QUESTIONS == 100
 
 
 # ── extract_question_texts ────────────────────────────────────────────────────

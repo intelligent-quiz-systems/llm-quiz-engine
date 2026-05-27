@@ -7,18 +7,26 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 from validations.validate_quiz import validate_quiz
 from datetime import datetime, timezone
-from uuid import uuid4 
+from uuid import uuid4
 from history.history import append_attempt, load_history
+from llm.partial_loading import GenerationStatus
 
 QUIZ_PAGE_SIZE = 3
 OPTION_LABELS = ["A", "B", "C", "D", "E", "F"]
 DEFAULT_QUESTION_COUNT = 10
 DEFAULT_TIME_LIMIT_MINUTES = 20
 DEFAULT_TOPIC = "Podstawy Pythona"
-MAX_QUESTION_COUNT = 100
+MAX_QUESTION_COUNT = 100  # runner CLI and JSON import — no UI limit applied here
+
+# UI question limits per difficulty (Streamlit only)
+_QUESTION_LIMITS_BY_DIFFICULTY = {
+    "Łatwy":  50,
+    "Średni": 50,
+    "Trudny": 20,
+}
 MAX_TIME_LIMIT_MINUTES = 60
-MAX_SOURCE_FILE_SIZE_BYTES = 10 * 1024 * 1024
-MIN_EXTRACTED_SOURCE_CHARS = 500
+MAX_SOURCE_FILE_SIZE_BYTES = 20 * 1024 * 1024
+MIN_EXTRACTED_SOURCE_CHARS = 2_500
 
 
 def format_size_label(size_bytes: int) -> str:
@@ -360,18 +368,20 @@ def render_config_screen():
             )
 
     topic = st.text_input("Temat quizu", key="topic_input")
-    question_count = st.number_input(
-        "Liczba pytań",
-        min_value=1,
-        max_value=MAX_QUESTION_COUNT,
-        value=DEFAULT_QUESTION_COUNT,
-        step=1,
-    )
     difficulty = st.selectbox(
         "Poziom trudności",
         options=list(QuizDifficulty),
         format_func=lambda x: x.value,
         index=1,
+    )
+    max_q = _QUESTION_LIMITS_BY_DIFFICULTY.get(str(difficulty), 50)
+    question_count = st.number_input(
+        "Liczba pytań",
+        min_value=1,
+        max_value=max_q,
+        value=min(DEFAULT_QUESTION_COUNT, max_q),
+        step=1,
+        help=f"Maksymalnie {max_q} pytań dla tego poziomu trudności",
     )
     time_limit = st.number_input(
         "Limit czasu (minuty)",
@@ -537,7 +547,7 @@ def render_quiz_screen(quiz, config):
             f"⚙️ Generowanie w toku: {len(questions)}/{requested} pytań dostępnych. "
             "Zakończenie quizu będzie możliwe po dograniu wszystkich pytań."
         )
-    elif st.session_state.get("generation_final_status") == "halted":
+    elif st.session_state.get("generation_final_status") == GenerationStatus.HALTED:
         requested = st.session_state.get("requested_question_count", len(questions))
         st.warning(
             f"Generowanie zostało przerwane. Quiz zawiera {len(questions)}/{requested} pytań."
@@ -729,8 +739,10 @@ def render_history_preview():
     st.subheader("Ostatnie wyniki")
 
     for entry in history[:5]:
+        finished_raw = entry.get('finished_at', '')
+        finished_str = finished_raw[:19].replace('T', ' ') if finished_raw else '—'
         st.write(
-            f"{entry['topic']} | {entry['score']}/{entry['max_score']} "
-            f"({entry['percent']}%) | {entry['difficulty']} | "
-            f"{entry['finished_at'][:19].replace('T', ' ')}"
+            f"{entry.get('topic', '—')} | {entry.get('score', '?')}/{entry.get('max_score', '?')} "
+            f"({entry.get('percent', '?')}%) | {entry.get('difficulty', '—')} | "
+            f"{finished_str}"
         )

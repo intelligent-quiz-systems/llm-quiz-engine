@@ -14,21 +14,30 @@ Status progression (with background worker — future):
   RUNNING → PARTIAL → COMPLETED | HALTED | FAILED
 """
 from __future__ import annotations
+from enum import Enum
 from typing import TYPE_CHECKING, Callable, TypedDict
 
 if TYPE_CHECKING:
     from llm.generation_state import GenerationState
 
-# ── Status constants ──────────────────────────────────────────────────────────
 
-STATUS_RUNNING   = "running"    # worker started, no questions yet
-STATUS_PARTIAL   = "partial"    # first batch available, worker still running
-STATUS_COMPLETED = "completed"  # all requested questions generated
-STATUS_HALTED    = "halted"     # some questions generated, stopped early
-STATUS_FAILED    = "failed"     # zero questions generated
+# ── Generation status ─────────────────────────────────────────────────────────
+
+class GenerationStatus(str, Enum):
+    """Generation lifecycle status. Inherits str so values compare equal to string literals."""
+    RUNNING   = "running"    # worker started, no questions yet
+    PARTIAL   = "partial"    # first batch available, worker still running
+    COMPLETED = "completed"  # all requested questions generated
+    HALTED    = "halted"     # some questions generated, stopped early
+    FAILED    = "failed"     # zero questions generated
+
 
 # Statuses that indicate generation will not continue
-FINAL_STATUSES = {STATUS_COMPLETED, STATUS_HALTED, STATUS_FAILED}
+FINAL_STATUSES: frozenset[GenerationStatus] = frozenset({
+    GenerationStatus.COMPLETED,
+    GenerationStatus.HALTED,
+    GenerationStatus.FAILED,
+})
 
 
 # ── Result type ───────────────────────────────────────────────────────────────
@@ -49,7 +58,7 @@ PartialReadyCallback = Callable[[PartialResult], None]
 
 # ── Status helpers ────────────────────────────────────────────────────────────
 
-def determine_final_status(state: "GenerationState") -> str:
+def determine_final_status(state: "GenerationState") -> GenerationStatus:
     """
     Derive the terminal generation status from a completed GenerationState.
     Call this after generation has fully stopped (success or failure).
@@ -57,10 +66,10 @@ def determine_final_status(state: "GenerationState") -> str:
     accepted  = state["accepted_questions"]
     requested = state["requested_questions"]
     if accepted == 0:
-        return STATUS_FAILED
+        return GenerationStatus.FAILED
     if accepted >= requested:
-        return STATUS_COMPLETED
-    return STATUS_HALTED
+        return GenerationStatus.COMPLETED
+    return GenerationStatus.HALTED
 
 
 def should_return_partial(state: "GenerationState", min_questions: int = 1) -> bool:
@@ -88,7 +97,7 @@ def build_partial_result(
     if is_final:
         status = determine_final_status(state)
     else:
-        status = STATUS_PARTIAL if accepted > 0 else STATUS_RUNNING
+        status = GenerationStatus.PARTIAL if accepted > 0 else GenerationStatus.RUNNING
 
     return PartialResult(
         status=status,
