@@ -19,3 +19,6 @@ INITIAL_BATCH_SIZE          = 10  # questions per API call on first attempt
 FALLBACK_BATCH_SIZE         = 5   # reduced batch size after first failure
 MIN_BATCH_SIZE              = 1   # floor — cannot go lower
 MAX_ATTEMPTS_PER_BATCH_SIZE = 2   # retries before reducing batch size
+
+# Guardrail context — maximum number of prior questions forwarded to the model
+GUARDRAIL_MAX_QUESTIONS = 10
