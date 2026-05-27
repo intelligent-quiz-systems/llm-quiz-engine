@@ -8,22 +8,20 @@ SRC_DIR = Path(__file__).resolve().parents[1]  # src
 if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
 
-from llm.llm_client import run_prompt
+
+from llm.llm_client import run_prompt, run_text_prompt
 from llm.quiz_model import Quiz, TopicFromText
 from llm.provider_errors import classify_provider_error, format_error_log
 from llm.generation_config import (
     TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS,
     SIMILAR_QUESTION_THRESHOLD, GUARDRAIL_MAX_QUESTIONS,
     INITIAL_BATCH_SIZE, FALLBACK_BATCH_SIZE, MIN_BATCH_SIZE, MAX_ATTEMPTS_PER_BATCH_SIZE,
-    SIMILAR_QUESTION_THRESHOLD,
 )
 from llm.question_quality import run_quality_checks, format_quality_log
 from llm.guardrail import build_guardrail_context, extract_question_texts, format_guardrail_log
 from llm.answer_shuffle import shuffle_quiz_options_balanced
 from llm.batch_strategy import run_batched_generation
 from llm.generation_state import create_state, format_state_summary
-from llm.question_quality import run_quality_checks, format_quality_log
-from llm.llm_client import run_prompt, run_text_prompt
 
 # Import Prompt Managera
 from prompt_manager.manager import PromptManager
@@ -49,9 +47,7 @@ def extract_topic_from_text(source_text: str) -> str | None:
         response = TopicFromText.model_validate(response_json)
         topic = response.topic.strip()
         return topic if topic else None
-    except Exception as e:
-        info = classify_provider_error(e)
-        print(format_error_log(info))
+    except Exception:
         return None
 
 

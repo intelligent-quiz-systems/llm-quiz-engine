@@ -836,8 +836,10 @@ def render_history_preview():
     st.subheader("Ostatnie wyniki")
 
     for entry in history[:5]:
+        finished_raw = entry.get('finished_at', '')
+        finished_str = finished_raw[:19].replace('T', ' ') if finished_raw else '—'
         st.write(
-            f"{entry['topic']} | {entry['score']}/{entry['max_score']} "
-            f"({entry['percent']}%) | {entry['difficulty']} | "
-            f"{entry['finished_at'][:19].replace('T', ' ')}"
+            f"{entry.get('topic', '—')} | {entry.get('score', '?')}/{entry.get('max_score', '?')} "
+            f"({entry.get('percent', '?')}%) | {entry.get('difficulty', '—')} | "
+            f"{finished_str}"
         )

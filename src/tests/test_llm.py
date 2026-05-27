@@ -101,12 +101,12 @@ def load_llm_module(
     mod_batch     = ModuleType("llm.batch_strategy")
     mod_state     = ModuleType("llm.generation_state")
     mod_config    = ModuleType("llm.generation_config")
+    mod_quality   = ModuleType("llm.question_quality")
     # Mocks for modules imported by llm.py when other PRs are merged:
     # diagnostics/provider-error-details, guardrail-prompt-builder, answer-shuffling
     mod_provider  = ModuleType("llm.provider_errors")
     mod_guardrail = ModuleType("llm.guardrail")
     mod_shuffle   = ModuleType("llm.answer_shuffle")
-    mod_quality   = ModuleType("llm.question_quality")
     mod_pm_pkg    = ModuleType("prompt_manager")
     mod_pm        = ModuleType("prompt_manager.manager")
 
