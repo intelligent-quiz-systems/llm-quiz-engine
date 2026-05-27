@@ -2,6 +2,8 @@
 Run a series of tests from a matrix and coordinate report + Excel generation.
 """
 import csv
+import json
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -112,6 +114,42 @@ def run_series(
         result["label"]   = t.get("label", "")
         results.append(result)
 
+    # Collect per-test diagnostic data from saved JSON files
+    batch_rows:     list[dict] = []
+    rejection_rows: list[dict] = []
+    quality_rows:   list[dict] = []
+
+    for t, result in zip(tests, results):
+        test_dir   = tests_dir / t["folder"]
+        test_id    = t["folder"]
+
+        batch_file = test_dir / "batch_summary.json"
+        if batch_file.exists():
+            try:
+                data = json.loads(batch_file.read_text(encoding="utf-8"))
+                for b in data.get("batches", []):
+                    batch_rows.append({"test_id": test_id, **b})
+            except Exception:
+                pass
+
+        rejection_file = test_dir / "rejections_detail.json"
+        if rejection_file.exists():
+            try:
+                data = json.loads(rejection_file.read_text(encoding="utf-8"))
+                for r in data.get("rejections", []):
+                    rejection_rows.append({"test_id": test_id, **r})
+            except Exception:
+                pass
+
+        quality_file = test_dir / "quality_issues.json"
+        if quality_file.exists():
+            try:
+                data = json.loads(quality_file.read_text(encoding="utf-8"))
+                for issue in data.get("issues", []):
+                    quality_rows.append({"test_id": test_id, **issue})
+            except Exception:
+                pass
+
     build_all_reports(reports_dir, results)
     print(f"\nReports: {reports_dir}")
 
@@ -119,8 +157,24 @@ def run_series(
         if not _EXCEL_AVAILABLE:
             print("[WARN] openpyxl not installed — Excel skipped. Run: pip install openpyxl")
         else:
-            excel_path = excel_dir / "analysis.xlsx"
-            build_excel(excel_path, results)
+            try:
+                git_branch = subprocess.check_output(
+                    ["git", "branch", "--show-current"],
+                    stderr=subprocess.DEVNULL, text=True,
+                ).strip() or None
+            except Exception:
+                git_branch = None
+
+            excel_path = excel_dir / "llm_observability_analytics.xlsx"
+            build_excel(
+                excel_path, results,
+                batch_rows=batch_rows,
+                rejection_rows=rejection_rows,
+                quality_rows=quality_rows,
+                run_id=series_dir.name,
+                run_datetime=now.strftime("%Y-%m-%d %H:%M:%S"),
+                git_branch=git_branch,
+            )
 
     completed = sum(1 for r in results if r.get("ok"))
     print(f"\nDone: {completed}/{len(results)} completed.")
