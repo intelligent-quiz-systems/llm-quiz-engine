@@ -8,7 +8,8 @@ SRC_DIR = Path(__file__).resolve().parents[1]  # src
 if str(SRC_DIR) not in sys.path:
     sys.path.append(str(SRC_DIR))
 
-from llm.llm_client import run_prompt
+
+from llm.llm_client import run_prompt, run_text_prompt
 from llm.quiz_model import Quiz, TopicFromText
 from llm.provider_errors import classify_provider_error, format_error_log
 from llm.generation_config import (
@@ -125,6 +126,40 @@ def generate_quiz(
 
     return _post_process_quiz(quiz_json, diagnostics_out=diagnostics_out)
 
+
+def generate_hint(
+    question: str,
+    options: list[str],
+    correct_answer: str,
+    context: str | None = None,
+    hint_level: str = "easy"
+) -> str | None:
+    """
+    Generuje podpowiedź na określonym poziomie trudności.
+    hint_level: "easy", "medium", "strong"
+    """
+    manager = PromptManager()
+
+    built = manager.build_from_template(
+        prompt_name="hint_generation",
+        version="v1",
+        question=question,
+        options=", ".join(options) if options else "No options",
+        correct_answer=correct_answer,
+        context=context if context else "No additional context provided.",
+        hint_level=hint_level
+    )
+
+    if not built:
+        return "Nie udało się wygenerować podpowiedzi."
+
+    try:
+        hint_text = run_text_prompt(built["system"], built["user"])
+        return hint_text if hint_text else None
+    except Exception as e:
+        print(f"Błąd podczas generowania podpowiedzi: {e}")
+        return "Nie udało się wygenerować podpowiedzi w tej chwili."
+    
 
 if __name__ == "__main__":
     quiz = generate_quiz(

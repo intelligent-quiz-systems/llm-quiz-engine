@@ -21,6 +21,22 @@ client = OpenAI(
     base_url=base_url
 )
 
+def run_text_prompt(
+    system_prompt: str,
+    user_prompt: str,
+) -> str | None:
+    """Runs an LLM prompt and returns plain text response."""
+    response = client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=LLM_TEMPERATURE,
+    )
+    content = response.choices[0].message.content
+    return content.strip() if content else None
+
 
 def run_prompt(
     system_prompt: str,
