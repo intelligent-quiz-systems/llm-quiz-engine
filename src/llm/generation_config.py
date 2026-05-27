@@ -14,7 +14,14 @@ LLM_TEMPERATURE = 0.7
 TOPIC_EXTRACTION_CHARS    = 2000
 QUIZ_SOURCE_CONTEXT_CHARS = 10000
 
+# Batch generation settings
+INITIAL_BATCH_SIZE          = 10  # questions per API call on first attempt
+FALLBACK_BATCH_SIZE         = 5   # reduced batch size after first failure
+MIN_BATCH_SIZE              = 1   # floor — cannot go lower
+MAX_ATTEMPTS_PER_BATCH_SIZE = 2   # retries before reducing batch size
+
 # Guardrail context — maximum number of prior questions forwarded to the model
 GUARDRAIL_MAX_QUESTIONS = 10
+
 # Question quality checks
 SIMILAR_QUESTION_THRESHOLD = 0.7   # Jaccard word-set similarity; pairs above this are flagged

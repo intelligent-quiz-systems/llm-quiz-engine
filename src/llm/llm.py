@@ -1,6 +1,7 @@
 import json
 import sys
 from pathlib import Path
+from pydantic import ValidationError
 
 SRC_DIR = Path(__file__).resolve().parents[1]  # src
 
@@ -9,13 +10,14 @@ if str(SRC_DIR) not in sys.path:
 
 from llm.llm_client import run_prompt
 from llm.quiz_model import Quiz, TopicFromText
-from llm.generation_config import TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS, GUARDRAIL_MAX_QUESTIONS
-from llm.guardrail import build_guardrail_context, extract_question_texts, format_guardrail_log
-from llm.generation_config import TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS, SIMILAR_QUESTION_THRESHOLD
+from llm.generation_config import (
+    TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS,
+    INITIAL_BATCH_SIZE, FALLBACK_BATCH_SIZE, MIN_BATCH_SIZE, MAX_ATTEMPTS_PER_BATCH_SIZE,
+    SIMILAR_QUESTION_THRESHOLD,
+)
+from llm.batch_strategy import run_batched_generation
+from llm.generation_state import create_state, format_state_summary
 from llm.question_quality import run_quality_checks, format_quality_log
-from llm.generation_config import TOPIC_EXTRACTION_CHARS, QUIZ_SOURCE_CONTEXT_CHARS
-from llm.answer_shuffle import shuffle_quiz_options
-from llm.provider_errors import classify_provider_error, format_error_log
 
 # Import Prompt Managera
 from prompt_manager.manager import PromptManager
@@ -41,10 +43,28 @@ def extract_topic_from_text(source_text: str) -> str | None:
         response = TopicFromText.model_validate(response_json)
         topic = response.topic.strip()
         return topic if topic else None
-    except Exception as e:
-        info = classify_provider_error(e)
-        print(format_error_log(info))
+    except Exception:
         return None
+
+
+def _post_process_quiz(quiz_json: dict, diagnostics_out: dict | None = None) -> dict | None:
+    """Validate Pydantic model, run quality checks, and log the final quiz."""
+    try:
+        Quiz.model_validate(quiz_json)
+    except ValidationError as e:
+        print("Validation error:", e)
+        return None
+    issues = run_quality_checks(
+        quiz_json.get("questions", []),
+        similar_threshold=SIMILAR_QUESTION_THRESHOLD,
+    )
+    if issues:
+        print(format_quality_log(issues))
+    if diagnostics_out is not None:
+        diagnostics_out["quality_issues"] = [dict(i) for i in issues]
+    print("\n===== VALIDATED QUIZ JSON =====")
+    print(json.dumps(quiz_json, indent=2, ensure_ascii=False))
+    return quiz_json
 
 
 def generate_quiz(
@@ -53,60 +73,43 @@ def generate_quiz(
     num_questions: int,
     source_text: str | None = None,
     previous_questions: list[str] | None = None,
-) -> str | None:
+    diagnostics_out: dict | None = None,
+) -> dict | None:
+    """
+    Orchestrate synchronous quiz generation.
+    For background generation use BackgroundGenerationWorker from background_worker.
 
-    manager = PromptManager()
-
-    guardrail_ctx = build_guardrail_context(
-        previous_questions or [],
-        max_questions=GUARDRAIL_MAX_QUESTIONS,
-    )
-    use_guardrail = bool(previous_questions)
-
-    built = manager.build_from_template(
-        prompt_name="quiz_generation",
-        version="v2" if use_guardrail else None,
-        topic=topic,
-        difficulty=difficulty,
-        num_questions=num_questions,
-        source_text=source_text[:QUIZ_SOURCE_CONTEXT_CHARS] if source_text else "No source text provided.",
-        guardrail=guardrail_ctx["text"],
-    )
-
-    if not built:
-        print("Błąd: nie udało się pobrać promptu quiz_generation")
-        return None
+    diagnostics_out: optional dict populated with GenerationState fields after
+    the run. Callers that pass None get identical behaviour.
+    """
+    state = create_state(topic, difficulty, num_questions, INITIAL_BATCH_SIZE)
 
     try:
-        quiz_json = run_prompt(built["system"], built["user"], Quiz)
-
-        if use_guardrail:
-            print(f"\n===== GUARDRAIL =====\n{format_guardrail_log(guardrail_ctx)}")
-
-        print("\n===== RESULT QUIZ JSON =====")
-        print(quiz_json)
-
-        quiz = Quiz.model_validate(quiz_json)
-        quiz_json = shuffle_quiz_options(quiz_json)
-
-        formatted_quiz_json = json.dumps(quiz_json, indent=2, ensure_ascii=False)
-
-        print("\n===== VALIDATED QUIZ JSON =====")
-        print(formatted_quiz_json)
-
-        issues = run_quality_checks(
-            quiz_json.get("questions", []),
-            similar_threshold=SIMILAR_QUESTION_THRESHOLD,
+        quiz_json = run_batched_generation(
+            topic, difficulty, num_questions, source_text,
+            initial_batch_size=INITIAL_BATCH_SIZE,
+            fallback_batch_size=FALLBACK_BATCH_SIZE,
+            min_batch_size=MIN_BATCH_SIZE,
+            max_attempts_per_size=MAX_ATTEMPTS_PER_BATCH_SIZE,
+            previous_questions=previous_questions,
+            state=state,
         )
-        if issues:
-            print(format_quality_log(issues))
-
-        return quiz_json
-
     except Exception as e:
-        info = classify_provider_error(e)
-        print(format_error_log(info))
+        print("Generation error:", e)
+        if diagnostics_out is not None:
+            diagnostics_out.update(dict(state))
+            diagnostics_out["generation_error"] = str(e)
         return None
+
+    print(format_state_summary(state))
+
+    if diagnostics_out is not None:
+        diagnostics_out.update(dict(state))
+
+    if quiz_json is None:
+        return None
+
+    return _post_process_quiz(quiz_json, diagnostics_out=diagnostics_out)
 
 
 if __name__ == "__main__":
