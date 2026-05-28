@@ -252,6 +252,8 @@ def run_batched_generation(
             _attempt_dur = round(time.monotonic() - _attempt_start, 3)
             decision = classify_exception(exc)
             print(f"[batch] {type(exc).__name__} -> {decision}")
+            from llm.provider_errors import classify_provider_error, format_error_log
+            print(format_error_log(classify_provider_error(exc)))
             if state is not None:
                 record_rejection(
                     state, current_batch, batch_attempt_count, batch_size, decision, type(exc).__name__,
