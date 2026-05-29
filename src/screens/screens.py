@@ -361,7 +361,7 @@ def render_config_screen():
     source_file = None
     if source_mode == "Plik":
         source_file = st.file_uploader(
-            f"Plik źródłowy (.txt lub .pdf, max {format_size_label(MAX_SOURCE_FILE_SIZE_BYTES)})",
+            f"Plik źródłowy (.txt lub .pdf, max {format_size_label(MAX_SOURCE_FILE_SIZE_BYTES)}, ~20 000 znaków / ~8 stron tekstu)",
             type=["txt", "pdf"],
             help="Po załadowaniu pliku temat quizu zostanie wykryty automatycznie przez LLM.",
             key=f"source_file_input_{st.session_state.source_uploader_version}",
@@ -538,6 +538,18 @@ def render_generating_screen(snapshot, requested_count: int):
         st.error(f"Błąd workera: {snapshot.error}")
 
 
+def render_generation_failed_message(err_detail: str, rag_summary: dict | None) -> None:
+    if rag_summary and not err_detail:
+        st.error(
+            "Generowanie quizu z pliku nie powiodło się.\n\n"
+            "Plik jest zbyt duży albo zawiera zbyt mało czytelnego tekstu. "
+            "Spróbuj użyć krótszego dokumentu, podzielić plik na mniejsze części "
+            "albo zmniejszyć liczbę pytań."
+        )
+    else:
+        st.error(f"Generowanie quizu nie powiodło się. Spróbuj ponownie{err_detail}")
+
+
 def render_quiz_screen(quiz, config):
     st_autorefresh(interval=1000, key="quiz_timer")
     if st.session_state.get("generation_worker") is not None:
@@ -572,7 +584,8 @@ def render_quiz_screen(quiz, config):
     elif st.session_state.get("generation_final_status") == GenerationStatus.HALTED:
         requested = st.session_state.get("requested_question_count", len(questions))
         st.warning(
-            f"Generowanie zostało przerwane. Quiz zawiera {len(questions)}/{requested} pytań."
+            f"Wygenerowano {len(questions)} z {requested} pytań.\n\n"
+            "Plik ma za mało unikalnego tekstu na taką ilość pytań."
         )
 
     total_pages = math.ceil(len(questions) / QUIZ_PAGE_SIZE)

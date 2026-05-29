@@ -8,6 +8,7 @@ from screens.screens import (
     inject_css,
     render_config_screen,
     render_generating_screen,
+    render_generation_failed_message,
     render_quiz_screen,
     render_results_screen,
 )
@@ -158,11 +159,12 @@ elif st.session_state.app_step == "generating":
 
     elif snapshot.is_done:
         err_detail = f": {snapshot.error}" if snapshot.error else ""
+        rag_summary = st.session_state.get("rag_split_summary")
         st.session_state.generation_worker = None
         st.session_state.generation_final_status = None
         st.session_state.requested_question_count = 0
         st.session_state.app_step = "config"
-        st.error(f"Generowanie quizu nie powiodło się. Spróbuj ponownie{err_detail}")
+        render_generation_failed_message(err_detail, rag_summary)
         st.stop()
 
     else:
