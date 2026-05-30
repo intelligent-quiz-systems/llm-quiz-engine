@@ -83,9 +83,12 @@ if st.session_state.app_step == "config":
             if slice_error:
                 st.error(slice_error)
                 st.stop()
-            if rag_split_summary.get("questions_capped"):
-                st.info(rag_split_summary["clamp_warning"])
             st.session_state.rag_split_summary = rag_split_summary
+            st.session_state.generation_clamp_warning = (
+                rag_split_summary.get("clamp_warning")
+                if rag_split_summary.get("questions_capped")
+                else None
+            )
 
         elif not effective_topic:
             st.error("Aby wygenerować quiz z tematu, wpisz temat quizu.")

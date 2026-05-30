@@ -361,7 +361,7 @@ def render_config_screen():
     source_file = None
     if source_mode == "Plik":
         source_file = st.file_uploader(
-            f"Plik źródłowy (.txt lub .pdf, max {format_size_label(MAX_SOURCE_FILE_SIZE_BYTES)}, ~20 000 znaków / ~8 stron tekstu)",
+            f"Plik źródłowy (.txt lub .pdf, max {format_size_label(MAX_SOURCE_FILE_SIZE_BYTES)}, do ok. 20 000 znaków / ok. 8 stron tekstu)",
             type=["txt", "pdf"],
             help="Po załadowaniu pliku temat quizu zostanie wykryty automatycznie przez LLM.",
             key=f"source_file_input_{st.session_state.source_uploader_version}",
@@ -519,6 +519,10 @@ def render_sidebar_status(quiz, config):
 def render_generating_screen(snapshot, requested_count: int):
     st_autorefresh(interval=1000, key="generation_poller")
 
+    clamp_warning = st.session_state.get("generation_clamp_warning")
+    if clamp_warning:
+        st.info(clamp_warning)
+
     partial = snapshot.partial_result
     accepted = partial.get("accepted_count", 0) if partial else 0
 
@@ -585,7 +589,8 @@ def render_quiz_screen(quiz, config):
         requested = st.session_state.get("requested_question_count", len(questions))
         st.warning(
             f"Wygenerowano {len(questions)} z {requested} pytań.\n\n"
-            "Plik ma za mało unikalnego tekstu na taką ilość pytań."
+            "Nie udało się wygenerować wszystkich pytań. "
+            "Spróbuj ponownie, zmniejsz liczbę pytań lub użyj krótszego pliku."
         )
 
     total_pages = math.ceil(len(questions) / QUIZ_PAGE_SIZE)

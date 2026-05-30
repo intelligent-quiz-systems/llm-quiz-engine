@@ -19,6 +19,11 @@ RAG_SOURCE_CONTEXT_CHARS  = 21_000   # RAG mode: max chars per source_slice pass
 # Checked in source_slices.py before the RAG pipeline runs.
 MAX_EXTRACTED_SOURCE_CHARS = 300_000
 
+# Hard limit for single-file RAG mode. Files whose extracted text exceeds this
+# are rejected before slicing to keep every API request within the free-tier
+# TPM budget. UI communicates "ok. 20 000 znaków" for a clean user-facing value.
+MAX_FILE_SOURCE_CHARS = 21_000
+
 # Minimum extracted text to accept a file at all.
 MIN_EXTRACTED_SOURCE_CHARS = 2_500
 
