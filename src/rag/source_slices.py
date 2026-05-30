@@ -19,6 +19,7 @@ import math
 
 from llm.generation_config import (
     MAX_EXTRACTED_SOURCE_CHARS,
+    MAX_FILE_SOURCE_CHARS,
     MIN_CHARS_PER_QUESTION,
     RAG_LARGE_FILE_THRESHOLD,
     TARGET_QUESTIONS_PER_SLICE_SMALL,
@@ -54,7 +55,8 @@ def _clamp_questions_to_file_size(
     if requested_questions > safe_q:
         return safe_q, (
             f"Ten plik ma za mało tekstu na {requested_questions} pytań. "
-            f"Na podstawie długości pliku zostanie wygenerowanych {safe_q} pytań."
+            f"Na podstawie długości pliku zostanie wygenerowanych {safe_q} pytań. "
+            "Zmniejsz liczbę pytań albo użyj dłuższego pliku."
         )
     return requested_questions, None
 
@@ -135,6 +137,16 @@ def build_source_slices_from_file(
             f"Plik zawiera zbyt dużo tekstu po ekstrakcji "
             f"({len(source_text):,} znaków). "
             f"Maksimum to {MAX_EXTRACTED_SOURCE_CHARS:,} znaków.",
+            None,
+        )
+
+    if len(source_text) > MAX_FILE_SOURCE_CHARS:
+        return (
+            None,
+            "Plik jest zbyt duży do wygenerowania quizu.\n\n"
+            "Maksymalny rozmiar tekstu w pliku PDF/TXT to około 20 000 znaków, "
+            "czyli mniej więcej 8 stron tekstu.\n\n"
+            "Podziel plik na mniejsze części albo użyj krótszego dokumentu.",
             None,
         )
 

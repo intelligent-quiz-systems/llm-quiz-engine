@@ -8,6 +8,7 @@ from screens.screens import (
     inject_css,
     render_config_screen,
     render_generating_screen,
+    render_generation_failed_message,
     render_quiz_screen,
     render_results_screen,
 )
@@ -82,9 +83,12 @@ if st.session_state.app_step == "config":
             if slice_error:
                 st.error(slice_error)
                 st.stop()
-            if rag_split_summary.get("questions_capped"):
-                st.info(rag_split_summary["clamp_warning"])
             st.session_state.rag_split_summary = rag_split_summary
+            st.session_state.generation_clamp_warning = (
+                rag_split_summary.get("clamp_warning")
+                if rag_split_summary.get("questions_capped")
+                else None
+            )
 
         elif not effective_topic:
             st.error("Aby wygenerować quiz z tematu, wpisz temat quizu.")
@@ -158,11 +162,12 @@ elif st.session_state.app_step == "generating":
 
     elif snapshot.is_done:
         err_detail = f": {snapshot.error}" if snapshot.error else ""
+        rag_summary = st.session_state.get("rag_split_summary")
         st.session_state.generation_worker = None
         st.session_state.generation_final_status = None
         st.session_state.requested_question_count = 0
         st.session_state.app_step = "config"
-        st.error(f"Generowanie quizu nie powiodło się. Spróbuj ponownie{err_detail}")
+        render_generation_failed_message(err_detail, rag_summary)
         st.stop()
 
     else:
