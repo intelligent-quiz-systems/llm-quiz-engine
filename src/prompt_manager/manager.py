@@ -109,11 +109,11 @@ class PromptManager:
 
             self.load_prompts()
 
-            print(f"✓ Dodano prompt '{prompt_name}' w wersji '{version}'")
+            print(f"[OK] Dodano prompt '{prompt_name}' w wersji '{version}'")
             return True
 
         except Exception as e:
-            print(f"✗ Błąd podczas dodawania promptu '{prompt_name}': {e}")
+            print(f"[ERR] Failed to add prompt '{prompt_name}': {e}")
             return False
 
     def build_from_template(

@@ -7,18 +7,27 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 from validations.validate_quiz import validate_quiz
 from datetime import datetime, timezone
-from uuid import uuid4 
+from uuid import uuid4
 from history.history import append_attempt, load_history
+from llm.partial_loading import GenerationStatus
+from llm.llm import generate_hint
 
 QUIZ_PAGE_SIZE = 3
 OPTION_LABELS = ["A", "B", "C", "D", "E", "F"]
 DEFAULT_QUESTION_COUNT = 10
 DEFAULT_TIME_LIMIT_MINUTES = 20
 DEFAULT_TOPIC = "Podstawy Pythona"
-MAX_QUESTION_COUNT = 10
+MAX_QUESTION_COUNT = 100  # runner CLI and JSON import — no UI limit applied here
+
+# UI question limits per difficulty (Streamlit only)
+_QUESTION_LIMITS_BY_DIFFICULTY = {
+    "Łatwy":  50,
+    "Średni": 50,
+    "Trudny": 20,
+}
 MAX_TIME_LIMIT_MINUTES = 60
-MAX_SOURCE_FILE_SIZE_BYTES = 10 * 1024 * 1024
-MIN_EXTRACTED_SOURCE_CHARS = 500
+MAX_SOURCE_FILE_SIZE_BYTES = 20 * 1024 * 1024
+MIN_EXTRACTED_SOURCE_CHARS = 2_500
 
 
 def format_size_label(size_bytes: int) -> str:
@@ -110,6 +119,13 @@ def init_state():
         "quiz_source_mode": "Temat quizu",
         "prev_quiz_source_mode": "Temat quizu",
         "source_uploader_version": 0,
+        "generation_worker": None,
+        "requested_question_count": 0,
+        "generation_final_status": None,
+        
+        # === STANY DLA SYSTEMU PODPOWIEDZI ===
+        "hint_usage": {},      # ile podpowiedzi użyto na pytanie (q_index -> int)
+        "shown_hints": {},     # lista pokazanych podpowiedzi (q_index -> list of dicts)
     }
 
     for key, value in defaults.items():
@@ -345,7 +361,7 @@ def render_config_screen():
     source_file = None
     if source_mode == "Plik":
         source_file = st.file_uploader(
-            f"Plik źródłowy (.txt lub .pdf, max {format_size_label(MAX_SOURCE_FILE_SIZE_BYTES)})",
+            f"Plik źródłowy (.txt lub .pdf, max {format_size_label(MAX_SOURCE_FILE_SIZE_BYTES)}, do ok. 20 000 znaków / ok. 8 stron tekstu)",
             type=["txt", "pdf"],
             help="Po załadowaniu pliku temat quizu zostanie wykryty automatycznie przez LLM.",
             key=f"source_file_input_{st.session_state.source_uploader_version}",
@@ -357,18 +373,20 @@ def render_config_screen():
             )
 
     topic = st.text_input("Temat quizu", key="topic_input")
-    question_count = st.number_input(
-        "Liczba pytań",
-        min_value=1,
-        max_value=MAX_QUESTION_COUNT,
-        value=DEFAULT_QUESTION_COUNT,
-        step=1,
-    )
     difficulty = st.selectbox(
         "Poziom trudności",
         options=list(QuizDifficulty),
         format_func=lambda x: x.value,
         index=1,
+    )
+    max_q = _QUESTION_LIMITS_BY_DIFFICULTY.get(str(difficulty), 50)
+    question_count = st.number_input(
+        "Liczba pytań",
+        min_value=1,
+        max_value=max_q,
+        value=min(DEFAULT_QUESTION_COUNT, max_q),
+        step=1,
+        help=f"Maksymalnie {max_q} pytań dla tego poziomu trudności",
     )
     time_limit = st.number_input(
         "Limit czasu (minuty)",
@@ -432,17 +450,28 @@ def format_option_with_letter(options, option_value):
 
 
 def reset_quiz_state():
+    """Resetuje cały stan quizu, w tym hinty i punktację."""
     st.session_state.quiz_deadline = None
     st.session_state.answers = {}
     st.session_state.current_page = 0
     st.session_state.timeout_happened = False
     st.session_state.quiz_started_at = None
     st.session_state.history_saved = False
+    
+    # Linie dodane według sugestii grupy:
+    st.session_state.generation_worker = None
+    st.session_state.generation_final_status = None
+    st.session_state.requested_question_count = 0
 
+    # Ważne: czyszczenie hintów
+    st.session_state.hint_usage = {}
+    st.session_state.shown_hints = {}
 
+    # Usuwanie widget keys
     keys_to_remove = [k for k in st.session_state.keys() if k.startswith("widget_q_")]
     for key in keys_to_remove:
-        del st.session_state[key]
+        if key in st.session_state:
+            del st.session_state[key]
 
 
 def render_sidebar_timer():
@@ -479,13 +508,56 @@ def render_sidebar_status(quiz, config):
         st.header(quiz.get("topic") or quiz.get("quiz_title", "Quiz"))
         st.progress(progress, text=f"Postęp: {answered}/{total_questions}")
         st.write(f"**Strona:** {st.session_state.current_page + 1}/{total_pages}")
+        if st.session_state.get("generation_worker") is not None:
+            requested = st.session_state.get("requested_question_count", total_questions)
+            st.caption(f"⚙️ Generowanie: {total_questions}/{requested} pytań")
         st.write(f"**Trudność:** {difficulty_label(config.get('difficulty'))}")
         st.write(f"**Limit czasu:** {config.get('time_limit', DEFAULT_TIME_LIMIT_MINUTES)} min")
         render_sidebar_timer()
 
 
+def render_generating_screen(snapshot, requested_count: int):
+    st_autorefresh(interval=1000, key="generation_poller")
+
+    clamp_warning = st.session_state.get("generation_clamp_warning")
+    if clamp_warning:
+        st.info(clamp_warning)
+
+    partial = snapshot.partial_result
+    accepted = partial.get("accepted_count", 0) if partial else 0
+
+    st.title("Generowanie quizu")
+    progress = min(accepted / requested_count, 1.0) if requested_count > 0 else 0.0
+    st.progress(progress, text=f"Pytania: {accepted}/{requested_count}")
+
+    if accepted > 0:
+        st.info(
+            f"Pierwsze {accepted} pytania gotowe. "
+            f"Quiz uruchomi się automatycznie po załadowaniu pierwszej strony ({QUIZ_PAGE_SIZE} pytań)."
+        )
+    else:
+        st.info("Generowanie pytań w toku... Proszę czekać.")
+
+    if snapshot.error:
+        st.error(f"Błąd workera: {snapshot.error}")
+
+
+def render_generation_failed_message(err_detail: str, rag_summary: dict | None) -> None:
+    if rag_summary and not err_detail:
+        st.error(
+            "Generowanie quizu z pliku nie powiodło się.\n\n"
+            "Plik jest zbyt duży albo zawiera zbyt mało czytelnego tekstu. "
+            "Spróbuj użyć krótszego dokumentu, podzielić plik na mniejsze części "
+            "albo zmniejszyć liczbę pytań."
+        )
+    else:
+        st.error(f"Generowanie quizu nie powiodło się. Spróbuj ponownie{err_detail}")
+
+
 def render_quiz_screen(quiz, config):
     st_autorefresh(interval=1000, key="quiz_timer")
+    if st.session_state.get("generation_worker") is not None:
+        st_autorefresh(interval=1500, key="generation_poller")
 
     is_valid, error_message = validate_quiz(quiz)
     if not is_valid:
@@ -499,6 +571,28 @@ def render_quiz_screen(quiz, config):
 
     st.title(quiz.get("quiz_title", quiz.get("topic", "Quiz")))
 
+    # === ZASADY PUNKTACJI (zwijane) ===
+    with st.expander("📋 Zasady punktacji", expanded=True):
+        st.markdown("""
+        • **Poprawna odpowiedź:** +1 punkt  
+        • **Niepoprawna odpowiedź:** 0 punktów  
+        • **Każda podpowiedź:** -0.5 punktu
+        """)
+
+    if st.session_state.get("generation_worker") is not None:
+        requested = st.session_state.get("requested_question_count", len(questions))
+        st.info(
+            f"⚙️ Generowanie w toku: {len(questions)}/{requested} pytań dostępnych. "
+            "Zakończenie quizu będzie możliwe po dograniu wszystkich pytań."
+        )
+    elif st.session_state.get("generation_final_status") == GenerationStatus.HALTED:
+        requested = st.session_state.get("requested_question_count", len(questions))
+        st.warning(
+            f"Wygenerowano {len(questions)} z {requested} pytań.\n\n"
+            "Nie udało się wygenerować wszystkich pytań. "
+            "Spróbuj ponownie, zmniejsz liczbę pytań lub użyj krótszego pliku."
+        )
+
     total_pages = math.ceil(len(questions) / QUIZ_PAGE_SIZE)
     page = st.session_state.current_page
 
@@ -507,24 +601,72 @@ def render_quiz_screen(quiz, config):
 
     for i in range(start, end):
         q = questions[i]
+        q_index = i
 
-        _prepare_widget_value(i)
+        _prepare_widget_value(q_index)
 
         st.markdown("<div class='question-card'>", unsafe_allow_html=True)
-        st.markdown(f"### Pytanie {i + 1}")
+        st.markdown(f"### Pytanie {q_index + 1}")
         st.write(q["question"])
 
+        # === Przycisk Podpowiedź (mniejszy, z spinnerem) ===
+        used_hints = st.session_state.hint_usage.get(q_index, 0)
+        remaining = 3 - used_hints
+
+        col_hint, col_remaining = st.columns([3, 1])
+        with col_hint:
+            if used_hints < 3:
+                if st.button(
+                    "🧠 Podpowiedź", 
+                    key=f"hint_btn_{q_index}",
+                    use_container_width=False,
+                    type="secondary"
+                ):
+                    with st.spinner("Generowanie podpowiedzi..."):
+                        hint_levels = ["easy", "medium", "strong"]
+                        hint_level = hint_levels[used_hints]
+                        
+                        context = None
+                        hint_text = generate_hint(
+                            question=q["question"],
+                            options=q["options"],
+                            correct_answer=q["options"][q["correct_index"]],
+                            context=context,
+                            hint_level=hint_level
+                        )
+
+                        if hint_text:
+                            if q_index not in st.session_state.shown_hints:
+                                st.session_state.shown_hints[q_index] = []
+                            
+                            st.session_state.shown_hints[q_index].append({
+                                "level": hint_level,
+                                "text": hint_text
+                            })
+                            st.session_state.hint_usage[q_index] = used_hints + 1
+                            st.rerun()
+
+        with col_remaining:
+            st.caption(f"**{remaining}** podpowiedzi pozostałe")
+
+        # Wyświetlanie wszystkich dotychczasowych podpowiedzi
+        if q_index in st.session_state.shown_hints and st.session_state.shown_hints[q_index]:
+            for idx, hint in enumerate(st.session_state.shown_hints[q_index], 1):
+                level_name = {"easy": "Łatwa", "medium": "Średnia", "strong": "Mocna"}[hint["level"]]
+                st.info(f"**Podpowiedź {idx} ({level_name}):** {hint['text']}")
+
+        # Opcje odpowiedzi
         st.radio(
-            f"Odpowiedź dla pytania {i + 1}",
+            f"Odpowiedź dla pytania {q_index + 1}",
             q["options"],
-            key=f"widget_q_{i}",
+            key=f"widget_q_{q_index}",
             format_func=lambda x, opts=q["options"]: format_option_with_letter(opts, x),
             on_change=_persist_widget_value,
-            args=(i,),
+            args=(q_index,),
             label_visibility="collapsed",
         )
 
-        _persist_widget_value(i)
+        _persist_widget_value(q_index)
         st.markdown("</div>", unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns(3)
@@ -540,24 +682,36 @@ def render_quiz_screen(quiz, config):
             st.rerun()
 
     with col3:
-        if st.button("Zakończ quiz", type="primary"):
-            st.session_state.app_step = "results"
-            st.rerun()
+        if st.session_state.get("generation_worker") is not None:
+            st.button("Zakończ quiz", type="primary", disabled=True)
+        else:
+            if st.button("Zakończ quiz", type="primary"):
+                st.session_state.app_step = "results"
+                st.rerun()
 
     inject_browser_scroll_on_nav()
 
 
 def calculate_score(quiz):
-    score = 0
+    """Oblicza wynik z uwzględnieniem kar za podpowiedzi"""
+    score = 0.0
+    max_score = len(quiz["questions"])
 
     for i, q in enumerate(quiz["questions"]):
         correct = q["options"][q["correct_index"]]
         answer = st.session_state.answers.get(i)
 
         if answer == correct:
-            score += 1
+            score += 1.0
 
-    return score
+    # Odejmij punkty za podpowiedzi
+    for q_index, used in st.session_state.hint_usage.items():
+        score -= used * 0.5
+
+    # Nie zezwalamy na wynik poniżej 0
+    score = max(0.0, score)
+
+    return score, max_score
 
 def build_history_entry(quiz, config, score):
     total = len(quiz.get("questions", []))
@@ -589,24 +743,42 @@ def render_results_screen(quiz, config):
 
     st.title("Wyniki quizu")
 
-    score = calculate_score(quiz)
-    total = len(quiz["questions"])
+    # Poprawne wywołanie calculate_score (zwraca tuple)
+    score, total = calculate_score(quiz)
 
+    # Zapisz do historii
     if not st.session_state.history_saved:
         append_attempt(build_history_entry(quiz, config, score))
         st.session_state.history_saved = True 
 
+    # === LEWA KOLUMNA - SZCZEGÓŁOWA PUNKTACJA ===
     with st.sidebar:
         st.header("Wyniki")
-        st.progress(score / total if total > 0 else 0.0, text=f"Poprawne: {score}/{total}")
+        
+        correct_answers = sum(1 for i, q in enumerate(quiz["questions"]) 
+                            if st.session_state.answers.get(i) == q["options"][q["correct_index"]])
+        
+        total_hints_used = sum(st.session_state.hint_usage.get(i, 0) for i in range(total))
+        hint_penalty = total_hints_used * 0.5
+
+        st.progress(score / total if total > 0 else 0.0, 
+                   text=f"**{score:.1f} / {total}**")
+        
+        st.write("**Szczegóły punktacji:**")
+        st.write(f"✅ Poprawne odpowiedzi: **{correct_answers}** × 1 pkt = **{correct_answers} pkt**")
+        st.write(f"❌ Niepoprawne odpowiedzi: **{total - correct_answers}** × 0 pkt = **0 pkt**")
+        st.write(f"🧠 Zużyte podpowiedzi: **{total_hints_used}** × -0.5 pkt = **-{hint_penalty:.1f} pkt**")
+        
+        st.divider()
+
         st.write(f"**Temat:** {quiz.get('topic') or quiz.get('quiz_title', 'Quiz')}")
         st.write(f"**Trudność:** {difficulty_label(config.get('difficulty'))}")
         st.write(f"**Limit czasu:** {config.get('time_limit', DEFAULT_TIME_LIMIT_MINUTES)} min")
 
+        st.divider()
+
     if st.session_state.timeout_happened:
         st.warning("Czas minął. Quiz został zakończony automatycznie.")
-
-    st.success(f"Wynik: {score}/{total}")
 
     for i, q in enumerate(quiz["questions"]):
         correct = q["options"][q["correct_index"]]
@@ -682,8 +854,10 @@ def render_history_preview():
     st.subheader("Ostatnie wyniki")
 
     for entry in history[:5]:
+        finished_raw = entry.get('finished_at', '')
+        finished_str = finished_raw[:19].replace('T', ' ') if finished_raw else '—'
         st.write(
-            f"{entry['topic']} | {entry['score']}/{entry['max_score']} "
-            f"({entry['percent']}%) | {entry['difficulty']} | "
-            f"{entry['finished_at'][:19].replace('T', ' ')}"
+            f"{entry.get('topic', '—')} | {entry.get('score', '?')}/{entry.get('max_score', '?')} "
+            f"({entry.get('percent', '?')}%) | {entry.get('difficulty', '—')} | "
+            f"{finished_str}"
         )
